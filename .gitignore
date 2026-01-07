@@ -1,0 +1,21 @@
+# PowerShell / Pester
+test_completion_*.ps1
+debug_*.ps1
+*.log
+*.clixml
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Output
+*.out
+test_monitor.ps1
