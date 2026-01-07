@@ -24,26 +24,28 @@ Describe 'Monitor module' {
 
     Context 'Argument Completer' {
         It 'provides completions via CommandCompletion (Integration)' {
-            # Note: This test runs against the real system state because CommandCompletion 
-            # uses the engine's command discovery which bypasses Pester mocks in this scope.
-            
             $script = 'Switch-MonitorInput -MonitorName '
             $cursor = $script.Length
             
-            # This triggers the actual completer registered in the module
-            $results = [System.Management.Automation.CommandCompletion]::CompleteInput($script, $cursor, $null)
-            $completionTexts = $results.CompletionMatches | ForEach-Object { $_.CompletionText }
+            # Use try/catch to debug failures
+            try {
+                $results = [System.Management.Automation.CommandCompletion]::CompleteInput($script, $cursor, $null)
+            } catch {
+                Write-Warning "CompleteInput failed: $_"
+                throw
+            }
 
-            # We expect completions if there are monitors, or at least no errors thrown.
-            # Since we saw monitors in the debug output ("Dell..."), we expect > 0.
-            # If run on a headless server, this might be 0, so we use a conditional check or warn.
+            # Check if we got a valid completion object
+            $results | Should -Not -BeNull
             
-            # Simple check: The completion object should not be null
-            $results | Should -Not -BeNullOrEmpty
-            
-            # Optional: Check if quotes are applied correctly if items are found
-            if ($completionTexts.Count -gt 0) {
-                 $completionTexts[0] | Should -Match "^'.*'$" 
+            # In CI environments (headless), we might get 0 matches. This is valid.
+            # Only if we HAVE monitors (detected via Get-MonitorInfo) must we have completions.
+            $monitors = Get-MonitorInfo
+            if ($monitors) {
+                $results.CompletionMatches.Count | Should -BeGreaterThan 0
+                $results.CompletionMatches[0].CompletionText | Should -Match "^'.*'$"
+            } else {
+                Write-Warning "Skipping completion match verification (no monitors detected)."
             }
         }
     }
