@@ -9,6 +9,8 @@ Describe 'Monitor module' {
         It 'imports and exposes functions' {
             Get-Command Get-MonitorInfo | Should -Not -BeNullOrEmpty
             Get-Command Switch-MonitorInput | Should -Not -BeNullOrEmpty
+            Get-Command Enable-MonitorPBP | Should -Not -BeNullOrEmpty
+            Get-Command Disable-MonitorPBP | Should -Not -BeNullOrEmpty
         }
 
         It 'InputSource parameter has ValidateSet values' {
@@ -64,6 +66,26 @@ Describe 'Monitor module' {
 
         It 'fails validation for invalid InputSource' {
             { Switch-MonitorInput -MonitorName 'Any' -InputSource 'InvalidSource' } | Should -Throw
+        }
+    }
+
+    Context 'PBP Functions Logic' {
+        It 'Enable-MonitorPBP supports ShouldProcess (WhatIf)' {
+            { Enable-MonitorPBP -MonitorName 'dell' -WhatIf } | Should -Not -Throw
+        }
+
+        It 'Disable-MonitorPBP supports ShouldProcess (WhatIf)' {
+            { Disable-MonitorPBP -MonitorName 'dell' -WhatIf } | Should -Not -Throw
+        }
+
+        It 'Enable-MonitorPBP returns false cleanly if no monitor matches' {
+            $result = Enable-MonitorPBP -MonitorName 'GhostMonitorXYZ' -Verbose
+            $result | Should -BeFalse
+        }
+
+        It 'Disable-MonitorPBP returns false cleanly if no monitor matches' {
+            $result = Disable-MonitorPBP -MonitorName 'GhostMonitorXYZ' -Verbose
+            $result | Should -BeFalse
         }
     }
 

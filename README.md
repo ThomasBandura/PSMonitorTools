@@ -6,6 +6,7 @@ PowerShell module to retrieve physical monitor information (Model, Serial, Firmw
 
 - **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date).
 - **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort).
+- **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors.
 - **Tab Completion**: Supports argument completion for monitor names.
 - **Robustness**: Uses both Low-Level Monitor Configuration API and WMI fallback.
 
@@ -51,11 +52,25 @@ Switch-MonitorInput -MonitorName 'U4924DW' -InputSource DisplayPort -Confirm
 - `DisplayPort`
 - `UsbC`
 
+### Control Picture-by-Picture (PBP)
+
+Enable or disable PBP mode on supported monitors (uses VCP code `0xE9`).
+
+```powershell
+# Enable PBP on a Dell monitor
+Enable-MonitorPBP -MonitorName 'Dell'
+
+# Disable PBP
+Disable-MonitorPBP -MonitorName 'Dell'
+```
+
 ## Requirements
 
 - Windows OS
 - PowerShell 5.1 or PowerShell 7+ (pwsh)
 - Monitors supporting DDC/CI (CI/DDC must be enabled in monitor settings)
+
+> **Note:** This module was tested exclusively with a **Dell U4924DW**.
 
 ## Project Structure
 

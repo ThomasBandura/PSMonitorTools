@@ -129,7 +129,96 @@ function Switch-MonitorInput {
 
 Export-ModuleMember -Function Switch-MonitorInput
 
-Register-ArgumentCompleter -CommandName Switch-MonitorInput -ParameterName MonitorName -ScriptBlock {
+
+function Enable-MonitorPBP {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            # VCP 0xE9 is commonly used for PBP/PIP. 0x24 is a common PBP mode.
+            $val = 0x24 
+            $action = "Enable PBP (0xE9 -> 0x24)"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0xE9, $val)) {
+                    Write-Verbose ("Enabled PBP on $($pm.Description)")
+                    return $true
+                } else {
+                    Throw "Failed to enable PBP on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Enable-MonitorPBP
+
+function Disable-MonitorPBP {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $val = 0x00
+            $action = "Disable PBP (0xE9 -> 0x00)"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0xE9, $val)) {
+                    Write-Verbose ("Disabled PBP on $($pm.Description)")
+                    return $true
+                } else {
+                    Throw "Failed to disable PBP on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Disable-MonitorPBP
+
+
+Register-ArgumentCompleter -CommandName Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP -ParameterName MonitorName -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
     $candidates = [System.Collections.Generic.List[string]]::new()
