@@ -217,8 +217,143 @@ function Disable-MonitorPBP {
 
 Export-ModuleMember -Function Disable-MonitorPBP
 
+function Set-MonitorAudioVolume {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(0, 100)]
+        [int]$Volume
+    )
 
-Register-ArgumentCompleter -CommandName Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP -ParameterName MonitorName -ScriptBlock {
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $val = [uint32]$Volume
+            $action = "Set Volume to $Volume"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x62, $val)) {
+                    Write-Verbose ("Set volume on $($pm.Description) to $Volume")
+                    return $true
+                } else {
+                    Throw "Failed to set volume on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Set-MonitorAudioVolume
+
+function Enable-MonitorAudio {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+            $val = 0x01 
+            $action = "Enable Audio (Unmute)"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x8D, $val)) {
+                    Write-Verbose ("Enabled audio on $($pm.Description)")
+                    return $true
+                } else {
+                    Throw "Failed to enable audio on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Enable-MonitorAudio
+
+function Disable-MonitorAudio {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+            $val = 0x00
+            $action = "Disable Audio (Mute)"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x8D, $val)) {
+                    Write-Verbose ("Disabled audio on $($pm.Description)")
+                    return $true
+                } else {
+                    Throw "Failed to disable audio on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Disable-MonitorAudio
+
+
+Register-ArgumentCompleter -CommandName Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP, Set-MonitorAudioVolume, Enable-MonitorAudio, Disable-MonitorAudio -ParameterName MonitorName -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
     $candidates = [System.Collections.Generic.List[string]]::new()

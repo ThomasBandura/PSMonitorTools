@@ -7,6 +7,8 @@ PowerShell module to retrieve physical monitor information (Model, Serial, Firmw
 - **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date).
 - **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort).
 - **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors.
+- **Set-MonitorAudioVolume**: Controls the volume of the monitor speakers.
+- **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or Unmutes the monitor audio.
 - **Tab Completion**: Supports argument completion for monitor names.
 - **Robustness**: Uses both Low-Level Monitor Configuration API and WMI fallback.
 
@@ -62,6 +64,21 @@ Enable-MonitorPBP -MonitorName 'Dell'
 
 # Disable PBP
 Disable-MonitorPBP -MonitorName 'Dell'
+```
+
+### Control Audio
+
+Control the volume and mute state of the monitor speakers.
+
+```powershell
+# Set volume to 50%
+Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
+
+# Unmute Audio
+Enable-MonitorAudio -MonitorName 'Dell'
+
+# Mute Audio
+Disable-MonitorAudio -MonitorName 'Dell'
 ```
 
 ## Requirements

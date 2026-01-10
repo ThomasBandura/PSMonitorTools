@@ -114,6 +114,67 @@ Describe 'Monitor module' {
         }
     }
 
+    Context "Disable-MonitorPBP" {
+        It "Should be exported" {
+            Get-Command Disable-MonitorPBP -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should support WhatIf" {
+            { Disable-MonitorPBP -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
+        }
+
+        It "Should handle non-existent monitor gracefully" {
+            Disable-MonitorPBP -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
+        }
+    }
+
+    Context "Set-MonitorAudioVolume" {
+        It "Should be exported" {
+            Get-Command Set-MonitorAudioVolume -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should support WhatIf" {
+            { Set-MonitorAudioVolume -MonitorName "NonExistent" -Volume 50 -WhatIf } | Should -Not -Throw
+        }
+
+        It "Should validate Volume range (0-100)" {
+            { Set-MonitorAudioVolume -MonitorName "Test" -Volume 101 } | Should -Throw
+            { Set-MonitorAudioVolume -MonitorName "Test" -Volume -1 } | Should -Throw
+        }
+
+        It "Should handle non-existent monitor gracefully" {
+            Set-MonitorAudioVolume -MonitorName "DefinitelyNotAMonitor" -Volume 50 | Should -BeFalse
+        }
+    }
+
+    Context "Enable-MonitorAudio" {
+        It "Should be exported" {
+            Get-Command Enable-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should support WhatIf" {
+            { Enable-MonitorAudio -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
+        }
+
+        It "Should handle non-existent monitor gracefully" {
+            Enable-MonitorAudio -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
+        }
+    }
+
+    Context "Disable-MonitorAudio" {
+        It "Should be exported" {
+            Get-Command Disable-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+
+        It "Should support WhatIf" {
+            { Disable-MonitorAudio -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
+        }
+
+        It "Should handle non-existent monitor gracefully" {
+            Disable-MonitorAudio -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
+        }
+    }
+
     Context 'Internals' {
         It 'Helper type is compiled and available' {
             ([System.Management.Automation.PSTypeName]'PSMonitorToolsHelper').Type | Should -Not -BeNullOrEmpty
