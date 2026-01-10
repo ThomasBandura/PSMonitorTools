@@ -11,16 +11,16 @@ Describe 'Monitor module' {
             Get-Command Switch-MonitorInput | Should -Not -BeNullOrEmpty
             Get-Command Enable-MonitorPBP | Should -Not -BeNullOrEmpty
             Get-Command Disable-MonitorPBP | Should -Not -BeNullOrEmpty
+            Get-Command Set-MonitorAudioVolume | Should -Not -BeNullOrEmpty
+            Get-Command Enable-MonitorAudio | Should -Not -BeNullOrEmpty
+            Get-Command Disable-MonitorAudio | Should -Not -BeNullOrEmpty
+            Get-Command Get-MonitorPBP | Should -Not -BeNullOrEmpty
+            Get-Command Find-MonitorVcpCodes | Should -Not -BeNullOrEmpty
         }
 
-        It 'InputSource parameter has ValidateSet values' {
-            $attr = (Get-Command Switch-MonitorInput).Parameters['InputSource'].Attributes
-            $vals = @()
-            foreach ($a in $attr) { if ($a -is [System.Management.Automation.ValidateSetAttribute]) { $vals += $a.ValidValues } }
-            $vals | Should -Contain 'Hdmi1'
-            $vals | Should -Contain 'Hdmi2'
-            $vals | Should -Contain 'DisplayPort'
-            $vals | Should -Contain 'UsbC'
+        It 'InputLeft parameter uses MonitorInput enum' {
+            $param = (Get-Command Switch-MonitorInput).Parameters['InputLeft']
+            $param.ParameterType.Name | Should -Be 'MonitorInput'
         }
     }
 
@@ -53,19 +53,34 @@ Describe 'Monitor module' {
     }
 
     Context 'Switch-MonitorInput Logic' {
-        It 'supports ShouldProcess (WhatIf)' {
-             # Smoke test for syntax/parameters without executing logic
+        It 'supports ShouldProcess (WhatIf) with legacy InputSource' {
             { Switch-MonitorInput -MonitorName 'dell' -InputSource Hdmi1 -WhatIf } | Should -Not -Throw
+        }
+
+        It 'supports ShouldProcess (WhatIf) with InputLeft' {
+            { Switch-MonitorInput -MonitorName 'dell' -InputLeft Hdmi1 -WhatIf } | Should -Not -Throw
+        }
+
+        It 'supports ShouldProcess (WhatIf) with InputRight' {
+            { Switch-MonitorInput -MonitorName 'dell' -InputRight DisplayPort -WhatIf } | Should -Not -Throw
+        }
+
+        It 'supports ShouldProcess (WhatIf) with both Inputs' {
+            { Switch-MonitorInput -MonitorName 'dell' -InputLeft Hdmi1 -InputRight DisplayPort -WhatIf } | Should -Not -Throw
+        }
+
+        It 'throws if no input is specified' {
+            { Switch-MonitorInput -MonitorName 'dell' } | Should -Throw
         }
 
         It 'returns false cleanly if no monitor matches' {
             # Integration test: 'GhostMonitorXYZ' should not exist
-            $result = Switch-MonitorInput -MonitorName 'GhostMonitorXYZ' -InputSource Hdmi1 -Verbose
+            $result = Switch-MonitorInput -MonitorName 'GhostMonitorXYZ' -InputLeft Hdmi1 -Verbose
             $result | Should -BeFalse
         }
 
         It 'fails validation for invalid InputSource' {
-            { Switch-MonitorInput -MonitorName 'Any' -InputSource 'InvalidSource' } | Should -Throw
+            { Switch-MonitorInput -MonitorName 'Any' -InputLeft 'InvalidSource' } | Should -Throw
         }
     }
 

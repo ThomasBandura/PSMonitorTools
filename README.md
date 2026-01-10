@@ -9,6 +9,7 @@ PowerShell module to retrieve physical monitor information (Model, Serial, Firmw
 - **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors.
 - **Set-MonitorAudioVolume**: Controls the volume of the monitor speakers.
 - **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or Unmutes the monitor audio.
+- **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes by comparing monitor state before and after a manual change.
 - **Tab Completion**: Supports argument completion for monitor names.
 - **Robustness**: Uses both Low-Level Monitor Configuration API and WMI fallback.
 
@@ -38,14 +39,17 @@ Index Name                          Model   SerialNumber Manufacturer Firmware W
 
 ### Switch Input Source
 
-Switch the input of a specific monitor. You can use the model name or description (wildcards supported).
+Switch the input of a specific monitor. You can control the Primary Input (Left) and the Secondary Input (Right) for PBP modes.
 
 ```powershell
-# Switch 'Dell' monitor to HDMI 1
-Switch-MonitorInput -MonitorName 'Dell' -InputSource Hdmi1
+# Switch 'Dell' monitor Primary Input to HDMI 1
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft Hdmi1
 
-# Switch to DisplayPort with confirmation
-Switch-MonitorInput -MonitorName 'U4924DW' -InputSource DisplayPort -Confirm
+# Switch Primary to HDMI 1 and Secondary to DisplayPort (PBP setup)
+Switch-MonitorInput -MonitorName 'U4924DW' -InputLeft Hdmi1 -InputRight DisplayPort
+
+# Legacy support: -InputSource is an alias for -InputLeft
+Switch-MonitorInput -MonitorName 'Dell' -InputSource Hdmi1
 ```
 
 **Supported Inputs:**
@@ -79,6 +83,14 @@ Enable-MonitorAudio -MonitorName 'Dell'
 
 # Mute Audio
 Disable-MonitorAudio -MonitorName 'Dell'
+```
+
+### Discover VCP Codes
+
+Interactively find hidden VCP codes by scanning the monitor, asking you to change a setting via OSD, and scanning again to find differences.
+
+```powershell
+Find-MonitorVcpCodes -MonitorName 'Dell U4924DW'
 ```
 
 ## Requirements
