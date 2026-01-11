@@ -5,10 +5,17 @@ PowerShell module to retrieve physical monitor information (Model, Serial, Firmw
 ## Features
 
 - **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date).
+- **Get-MonitorInput**: Retrieves current input sources and PBP status for a specific monitor.
 - **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort).
 - **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors.
+- **Get-MonitorAudioVolume**: Retrieves current audio volume.
 - **Set-MonitorAudioVolume**: Controls the volume of the monitor speakers.
+- **Get-MonitorAudio**: Retrieves current audio mute state (Enabled/Disabled).
 - **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or Unmutes the monitor audio.
+- **Get-MonitorBrightness**: Retrieves current brightness (luminance) level (0-100).
+- **Set-MonitorBrightness**: Sets the brightness level.
+- **Get-MonitorContrast**: Retrieves current contrast level (0-100).
+- **Set-MonitorContrast**: Sets the contrast level.
 - **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes by comparing monitor state before and after a manual change.
 - **Tab Completion**: Supports argument completion for monitor names.
 - **Robustness**: Uses both Low-Level Monitor Configuration API and WMI fallback.
@@ -27,7 +34,11 @@ Import-Module ./PSMonitorTools/PSMonitorTools.psd1
 ### Get Monitor Information
 
 ```powershell
+# Get all monitors
 Get-MonitorInfo
+
+# Get specific monitor
+Get-MonitorInfo -MonitorName 'Dell'
 ```
 
 **Output:**
@@ -35,6 +46,21 @@ Get-MonitorInfo
 Index Name                          Model   SerialNumber Manufacturer Firmware WeekOfManufacture YearOfManufacture
 ----- ----                          -----   ------------ ------------ -------- ----------------- -----------------
     0 Dell U4924DW(DisplayPort 1.4) U4924DW xxxxxxx      DEL          105                     26              2023
+```
+
+### Get Input State
+
+Check the current active input(s) and Picture-by-Picture (PBP) status.
+
+```powershell
+Get-MonitorInput -MonitorName 'Dell'
+```
+
+**Output:**
+```text
+Name                              Model   PBP InputLeft   InputRight
+----                              -----   --- ---------   ----------
+Dell U4924DW(DisplayPort PBP/PIP) U4924DW True Hdmi1      DisplayPort
 ```
 
 ### Switch Input Source
@@ -75,8 +101,14 @@ Disable-MonitorPBP -MonitorName 'Dell'
 Control the volume and mute state of the monitor speakers.
 
 ```powershell
+# Get current volume
+Get-MonitorAudioVolume -MonitorName 'Dell'
+
 # Set volume to 50%
 Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
+
+# Get current audio status (Enabled=Unmuted, Disabled=Muted)
+Get-MonitorAudio -MonitorName 'Dell'
 
 # Unmute Audio
 Enable-MonitorAudio -MonitorName 'Dell'
@@ -85,12 +117,34 @@ Enable-MonitorAudio -MonitorName 'Dell'
 Disable-MonitorAudio -MonitorName 'Dell'
 ```
 
+### Control Brightness & Contrast
+
+Adjust the screen brightness (luminance) and contrast.
+
+```powershell
+# Get current brightness
+Get-MonitorBrightness -MonitorName 'Dell'
+
+# Set brightness to 75%
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 75
+
+# Get current contrast
+Get-MonitorContrast -MonitorName 'Dell'
+
+# Set contrast to 60%
+Set-MonitorContrast -MonitorName 'Dell' -Contrast 60
+```
+
 ### Discover VCP Codes
 
 Interactively find hidden VCP codes by scanning the monitor, asking you to change a setting via OSD, and scanning again to find differences.
 
 ```powershell
+# Standard Scan (Common Consumer Codes)
 Find-MonitorVcpCodes -MonitorName 'Dell U4924DW'
+
+# Full Scan (0x00 - 0xFF) - Useful for finding proprietary codes (like KVM)
+Find-MonitorVcpCodes -MonitorName 'Dell U4924DW' -FullScan
 ```
 
 ## Requirements

@@ -47,7 +47,10 @@ function ForEach-PhysicalMonitor {
 
 function Get-MonitorInfo {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter(Mandatory = $false, Position = 0)]
+        [string]$MonitorName
+    )
     $results = [System.Collections.Generic.List[psobject]]::new()
 
     ForEach-PhysicalMonitor {
@@ -57,6 +60,17 @@ function Get-MonitorInfo {
         $name = $physicalMonitor.Description
         $cap = try { [PSMonitorToolsHelper]::GetMonitorCapabilities($physicalMonitor.Handle) } catch { $null }
         if ($cap -and $cap -match 'model\(([^)]+)\)') { $model = $matches[1] } else { $model = if ($wmiMonitor) { (& { -join ($args[0] | Where-Object {$_} | ForEach-Object {[char]$_}) } $wmiMonitor.UserFriendlyName) } else { $null } }
+        
+        # Filter if MonitorName is provided
+        if (-not [string]::IsNullOrWhiteSpace($MonitorName)) {
+            $wmiNameCheck = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+             if (-not (($name -and $name -like "*$MonitorName*") -or 
+                ($model -and $model -like "*$MonitorName*") -or 
+                ($wmiNameCheck -and $wmiNameCheck -like "*$MonitorName*"))) {
+                return # Skip this monitor
+            }
+        }
+
         $serial = if ($wmiMonitor) { (& { -join ($args[0] | Where-Object {$_} | ForEach-Object {[char]$_}) } $wmiMonitor.SerialNumberID) } else { $null }
         $manufacturer = if ($wmiMonitor) { (& { -join ($args[0] | Where-Object {$_} | ForEach-Object {[char]$_}) } $wmiMonitor.ManufacturerName) } else { $null }
         if ($physicalMonitor.Handle -and [PSMonitorToolsHelper]::GetVcpFeature($physicalMonitor.Handle, 0xC9, [ref]$currentValue, [ref]$maxValue)) { $firmware = "{0:x}" -f ($currentValue -band 0x7FF) } else { $firmware = $null }
@@ -114,6 +128,70 @@ function Get-MonitorPBP {
 }
 
 Export-ModuleMember -Function Get-MonitorPBP
+
+function Get-MonitorInput {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            # Check PBP Status
+            $pbpActive = $false
+            $currPbp = 0; $maxPbp = 0
+            if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE9, [ref]$currPbp, [ref]$maxPbp)) {
+                $pbpActive = ($currPbp -ne 0x00)
+            }
+
+            $currentLeftVal = 0; $maxL = 0
+            $currentRightVal = 0; $maxR = 0
+            
+            # 0x60 is standard Input Select (Left/Primary)
+            $hasLeft = [PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currentLeftVal, [ref]$maxL)
+            
+            # PBP Right Input (VCP 0xE8)
+            $hasRight = $false
+            if ($pbpActive) {
+                $hasRight = [PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currentRightVal, [ref]$maxR)
+            }
+
+            $leftCode = if ($hasLeft) { $currentLeftVal -band 0xFF } else { $null }
+            $rightCode = if ($hasRight) { $currentRightVal -band 0xFF } else { $null }
+
+            $leftInputSpec = if ($null -ne $leftCode) {
+                if ([Enum]::IsDefined([MonitorInput], [int]$leftCode)) { [MonitorInput][int]$leftCode } else { "Unknown (0x{0:X2})" -f $leftCode }
+            } else { $null }
+
+            $rightInputSpec = if ($null -ne $rightCode) {
+                if ([Enum]::IsDefined([MonitorInput], [int]$rightCode)) { [MonitorInput][int]$rightCode } else { "Unknown (0x{0:X2})" -f $rightCode }
+            } else { $null }
+
+            [pscustomobject]@{
+                Name = $pm.Description
+                Model = $model
+                PBP = $pbpActive
+                InputLeft = $leftInputSpec
+                InputRight = $rightInputSpec
+            }
+        }
+    }
+
+    $results
+}
+
+Export-ModuleMember -Function Get-MonitorInput
 
 function Switch-MonitorInput {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
@@ -309,6 +387,41 @@ function Disable-MonitorPBP {
 
 Export-ModuleMember -Function Disable-MonitorPBP
 
+function Get-MonitorAudioVolume {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $curr = 0; $max = 0
+            $volume = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x62, [ref]$curr, [ref]$max)) { $curr } else { $null }
+            
+            [pscustomobject]@{
+                Name = $pm.Description
+                Model = $model
+                Volume = $volume
+            }
+        }
+    }
+
+    $results
+}
+
+Export-ModuleMember -Function Get-MonitorAudioVolume
+
 function Set-MonitorAudioVolume {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
@@ -355,6 +468,44 @@ function Set-MonitorAudioVolume {
 }
 
 Export-ModuleMember -Function Set-MonitorAudioVolume
+
+function Get-MonitorAudio {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $curr = 0; $max = 0
+            $audioStatus = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x8D, [ref]$curr, [ref]$max)) { 
+                # 0x01 = On, 0x00 = Off/Mute.
+                if ($curr -eq 1) { $true } else { $false }
+            } else { $null }
+            
+            [pscustomobject]@{
+                Name = $pm.Description
+                Model = $model
+                AudioEnabled = $audioStatus
+            }
+        }
+    }
+
+    $results
+}
+
+Export-ModuleMember -Function Get-MonitorAudio
 
 function Enable-MonitorAudio {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
@@ -444,6 +595,178 @@ function Disable-MonitorAudio {
 
 Export-ModuleMember -Function Disable-MonitorAudio
 
+function Get-MonitorBrightness {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $curr = 0; $max = 0
+            # VCP 0x10 = Luminance/Brightness
+            $val = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x10, [ref]$curr, [ref]$max)) { $curr } else { $null }
+            
+            [pscustomobject]@{
+                Name = $pm.Description
+                Model = $model
+                Brightness = $val
+            }
+        }
+    }
+
+    $results
+}
+
+Export-ModuleMember -Function Get-MonitorBrightness
+
+function Set-MonitorBrightness {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(0, 100)]
+        [int]$Brightness
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $val = [uint32]$Brightness
+            $action = "Set Brightness to $Brightness"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                # VCP 0x10 = Luminance/Brightness
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x10, $val)) {
+                    Write-Verbose ("Set brightness on $($pm.Description) to $Brightness")
+                    return $true
+                } else {
+                    Throw "Failed to set brightness on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Set-MonitorBrightness
+
+function Get-MonitorContrast {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName
+    )
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $curr = 0; $max = 0
+            # VCP 0x12 = Contrast
+            $val = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x12, [ref]$curr, [ref]$max)) { $curr } else { $null }
+            
+            [pscustomobject]@{
+                Name = $pm.Description
+                Model = $model
+                Contrast = $val
+            }
+        }
+    }
+
+    $results
+}
+
+Export-ModuleMember -Function Get-MonitorContrast
+
+function Set-MonitorContrast {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(0, 100)]
+        [int]$Contrast
+    )
+
+    $cmdletContext = $PSCmdlet
+
+    $results = ForEach-PhysicalMonitor {
+        param($pm, $wmiMonitor, $idx)
+        
+        $model = try { if ([PSMonitorToolsHelper]::GetMonitorCapabilities($pm.Handle) -match 'model\(([^)]+)\)') { $matches[1] } else { $null } } catch { $null }
+        $wmiName = if ($wmiMonitor) { -join ($wmiMonitor.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_}) } else { $null }
+
+        Write-Verbose "Checking monitor: Description='$($pm.Description)', Model='$model', WmiName='$wmiName' against '$MonitorName'"
+
+        if (($pm.Description -and $pm.Description -like "*$MonitorName*") -or 
+            ($model -and $model -like "*$MonitorName*") -or 
+            ($wmiName -and $wmiName -like "*$MonitorName*")) {
+            
+            $val = [uint32]$Contrast
+            $action = "Set Contrast to $Contrast"
+            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
+                # VCP 0x12 = Contrast
+                if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x12, $val)) {
+                    Write-Verbose ("Set contrast on $($pm.Description) to $Contrast")
+                    return $true
+                } else {
+                    Throw "Failed to set contrast on $($pm.Description)"
+                }
+            } else {
+                return $false
+            }
+        }
+        return $false
+    }
+
+    if ($results -contains $true) { return $true }
+    return $false
+}
+
+Export-ModuleMember -Function Set-MonitorContrast
+
+
+
+
+
 function Find-MonitorVcpCodes {
     <#
     .SYNOPSIS
@@ -466,10 +789,15 @@ function Find-MonitorVcpCodes {
         [string]$MonitorName,
 
         [Parameter(Mandatory=$false)]
-        [byte[]]$ScanRange
+        [byte[]]$ScanRange,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$FullScan
     )
 
-    if (-not $ScanRange) {
+    if ($FullScan) {
+        $ScanRange = 0x00..0xFF
+    } elseif (-not $ScanRange) {
         $ScanRange = @(0x60) + (0xE0..0xFF)
     }
 
@@ -488,14 +816,19 @@ function Find-MonitorVcpCodes {
             Write-Host "`nTarget Found: $($pm.Description)" -ForegroundColor Cyan
             
             # --- 1. Baseline ---
-            Write-Host "[Step 1] Reading baseline VCP values..." -ForegroundColor Yellow
+            Write-Host "[Step 1] Reading baseline VCP values ($($ScanRange.Count) codes to scan)..." -ForegroundColor Yellow
             $baseline = @{}
+            $i = 0
             foreach ($code in $ScanRange) {
+                $i++
+                if ($i % 5 -eq 0) { Write-Progress -Activity "Reading Baseline" -Status "Scanning VCP 0x$("{0:X2}" -f $code)" -PercentComplete (($i / $ScanRange.Count) * 100) }
+                
                 $curr = 0; $max = 0
                 if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, $code, [ref]$curr, [ref]$max)) {
                     $baseline[$code] = $curr
                 }
             }
+            Write-Progress -Activity "Reading Baseline" -Completed
             Write-Host "Baseline captured ($($baseline.Count) codes readable)." -ForegroundColor Green
 
             # --- 2. Pause ---
@@ -509,7 +842,12 @@ function Find-MonitorVcpCodes {
             Write-Host "[Step 3] Reading new VCP values..." -ForegroundColor Yellow
             $changesFound = $false
 
-            foreach ($code in $baseline.Keys) {
+            $i = 0
+            $keysToCheck = $baseline.Keys
+            foreach ($code in $keysToCheck) {
+                $i++
+                if ($i % 5 -eq 0) { Write-Progress -Activity "Comparing Values" -Status "Checking VCP 0x$("{0:X2}" -f $code)" -PercentComplete (($i / $keysToCheck.Count) * 100) }
+
                 # Rescan specific code
                 $curr = 0; $max = 0
                 if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, $code, [ref]$curr, [ref]$max)) {
@@ -524,6 +862,7 @@ function Find-MonitorVcpCodes {
                     }
                 }
             }
+            Write-Progress -Activity "Comparing Values" -Completed
             
             if (-not $changesFound) {
                 Write-Host "No VCP changes detected in the scanned range." -ForegroundColor Gray
@@ -541,7 +880,7 @@ function Find-MonitorVcpCodes {
 
 Export-ModuleMember -Function Find-MonitorVcpCodes
 
-Register-ArgumentCompleter -CommandName Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP, Set-MonitorAudioVolume, Enable-MonitorAudio, Disable-MonitorAudio, Find-MonitorVcpCodes -ParameterName MonitorName -ScriptBlock {
+Register-ArgumentCompleter -CommandName Get-MonitorInfo, Get-MonitorInput, Get-MonitorPBP, Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP, Get-MonitorAudioVolume, Set-MonitorAudioVolume, Get-MonitorAudio, Enable-MonitorAudio, Disable-MonitorAudio, Get-MonitorBrightness, Set-MonitorBrightness, Get-MonitorContrast, Set-MonitorContrast, Find-MonitorVcpCodes -ParameterName MonitorName -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
     $candidates = [System.Collections.Generic.List[string]]::new()
