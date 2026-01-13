@@ -18,7 +18,8 @@ PowerShell module to retrieve physical monitor information (Model, Serial, Firmw
 - **Set-MonitorContrast**: Sets the contrast level.
 - **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes by comparing monitor state before and after a manual change.
 - **Tab Completion**: Supports argument completion for monitor names.
-- **Robustness**: Uses both Low-Level Monitor Configuration API and WMI fallback.
+- **Robustness (v0.6+)**: Includes "Smart Ordering" to prevent input collisions in PBP/Picture-by-Picture modes and active waiting for monitor readiness to ensure reliable command execution.
+- **Dual-API Strategy**: Uses both Low-Level Monitor Configuration API and WMI fallback.
 
 ## Installation
 

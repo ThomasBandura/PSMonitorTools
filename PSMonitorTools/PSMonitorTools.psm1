@@ -252,38 +252,111 @@ function Switch-MonitorInput {
                     return $false
                 }
             }
-
-            # Handle Primary Input (Left) - VCP 0x60
-            if ($doSetLeft) {
-                $val = [uint32]$InputLeft
+            
+            # Helper for Set and Verify
+            $FnSetVerify = {
+                param($Code, $Val, $Desc)
+                $action = "Set $Desc input to 0x{0:X}" -f $Val
                 
-                # If PBP is active, mask with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
-                if ($pbpActive) {
-                    $val = 0xF00 + $val
-                    Write-Verbose ("PBP is active. Using masked value 0x{0:x} for Left Input." -f $val)
-                }
-
-                $action = "Set Primary/Left input to $InputLeft"
                 if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-                    if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x60, $val)) {
-                        Write-Verbose ("Set Primary/Left input on $($pm.Description) to $InputLeft (0x{0:x})" -f $val)
-                    } else {
-                        Write-Error "Failed to set Primary/Left input on $($pm.Description)"
-                        $success = $false
+                    # Retry logic for SET command (Monitor might be busy/switching modes)
+                    $setSuccess = $false
+                    $attempt = 1
+                    $maxAttempts = 5
+
+                    while (-not $setSuccess -and $attempt -le $maxAttempts) {
+                        if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, $Code, $Val)) {
+                            $setSuccess = $true
+                        } else {
+                            Write-Verbose "Attempt $attempt/$maxAttempts to set $Desc input failed (Monitor busy?). Retrying in 1s..."
+                            Start-Sleep -Seconds 1
+                            $attempt++
+                        }
                     }
+
+                    if ($setSuccess) {
+                        Write-Verbose ("Set $Desc input on $($pm.Description) to 0x{0:X}" -f $Val)
+                        
+                        # Verification Loop
+                        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                        $verified = $false
+                        while ($sw.Elapsed.TotalSeconds -lt 10) {
+                            Start-Sleep -Milliseconds 500
+                            $c = 0; $m = 0
+                            if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, $Code, [ref]$c, [ref]$m)) {
+                                if (($c -band 0xFF) -eq ($Val -band 0xFF)) {
+                                    $verified = $true
+                                    Write-Verbose ("Verified $Desc input switched to 0x{0:X}" -f ($c -band 0xFF))
+                                    break
+                                }
+                            }
+                        }
+                        $sw.Stop()
+                        
+                        if (-not $verified) {
+                            Write-Warning ("Monitor '$($pm.Description)' did not confirm switch of $Desc input to '0x{0:X}' within 10 seconds." -f $Val)
+                        }
+                        return $true
+                    } else {
+                        Write-Error "Failed to set $Desc input on $($pm.Description) after $maxAttempts attempts."
+                        return $false
+                    }
+                } else {
+                    return $true
                 }
             }
 
-            # Handle Secondary Input (Right) - VCP 0xE8
-            if ($doSetRight) {
-                $val = [uint32]$InputRight
-                $action = "Set Secondary/Right input to $InputRight"
-                if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-                    if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0xE8, $val)) {
-                        Write-Verbose ("Set Secondary/Right input on $($pm.Description) to $InputRight (0x{0:x})" -f $val)
+            # Define steps
+            $steps = [System.Collections.Generic.List[psobject]]::new()
+            if ($doSetLeft) { 
+                $steps.Add([pscustomobject]@{ Type="Left"; Code=0x60; Input=[uint32]$InputLeft; MaskPbp=$true }) 
+            }
+            if ($doSetRight) { 
+                $steps.Add([pscustomobject]@{ Type="Right"; Code=0xE8; Input=[uint32]$InputRight; MaskPbp=$false }) 
+            }
+
+            # Smart Ordering: Collision Detection
+            # If Target Left matches Current Right, we must switch Right FIRST to free up the input.
+            if ($pbpActive -and $doSetLeft -and $doSetRight) {
+                # CurrentRightVal comes from the PBP check block above
+                if (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) {
+                    Write-Verbose "Smart Ordering: Target Left matches Current Right. Switching Right input FIRST to avoid collision."
+                    $steps.Reverse()
+                }
+            }
+
+            foreach ($step in $steps) {
+                $val = $step.Input
+                
+                # If PBP is active, mask Left input with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
+                if ($pbpActive -and $step.MaskPbp) {
+                    $val = 0xF00 + $val
+                    Write-Verbose ("PBP is active. Using masked value 0x{0:X} for Left Input." -f $val)
+                }
+
+                $desc = if ($step.Type -eq "Left") { "Primary/Left" } else { "Secondary/Right" }
+
+                if (-not (& $FnSetVerify $step.Code $val $desc)) {
+                    $success = $false
+                }
+            }
+            
+            # 3. Wait for Ready State (Post-Switch Stability)
+            # Ensure function doesn't return until monitor accepts DDC commands again.
+            if ($success) {
+                Write-Verbose "Waiting for monitor to stabilize..."
+                $ready = $false
+                $waitRetry = 0
+                while (-not $ready -and $waitRetry -lt 20) { # Max 10 seconds wait (20 * 500ms)
+                    Start-Sleep -Milliseconds 500
+                    # Test Read on Input Select (0x60). If this succeeds, monitor is DDC-ready.
+                    $c = 0; $m = 0
+                    if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$c, [ref]$m)) {
+                        $ready = $true
+                        Write-Verbose "Monitor is ready for new commands."
                     } else {
-                        Write-Error "Failed to set Secondary/Right input on $($pm.Description)"
-                        $success = $false
+                        Write-Verbose "Monitor busy (DDC read failed). Waiting..."
+                        $waitRetry++
                     }
                 }
             }
