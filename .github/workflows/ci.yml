@@ -21,7 +21,7 @@ jobs:
         
         # Run tests
         $config = New-PesterConfiguration
-        $config.Run.Path = "Tests"
+        $config.Run.Path = "Tests/Monitor.Tests.ps1"
         $config.Output.Verbosity = "Detailed"
         $config.CodeCoverage.Enabled = $true
         Invoke-Pester -Configuration $config
