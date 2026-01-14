@@ -2,6 +2,14 @@
 
 PowerShell module to retrieve physical monitor information (Model, Serial, Firmware) and control input sources (HDMI, DP, USB-C) via DDC/CI / VCP codes.
 
+## Project Goals
+
+The primary goal of this project is to provide a reliable programmatic interface for controlling physical monitor settings on Windows. By exposing DDC/CI capabilities through friendly PowerShell cmdlets, it facilitates automation scenarios such as:
+- **Automation:** Switching monitor inputs based on work context (e.g., software KVM switching logic).
+- **Comfort:** Adjusting brightness and contrast programmatically (e.g., based on time of day).
+- **Efficiency:** Managing Picture-by-Picture (PBP) modes without navigating cumbersome OSD (On-Screen Display) menus.
+- **Inventory:** Retrieving hardware details (Serial Numbers, Firmware) for asset management.
+
 ## Features
 
 - **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date).
