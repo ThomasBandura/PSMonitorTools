@@ -32,9 +32,8 @@ function ForEach-PhysicalMonitor {
         if (-not $physicalMonitors) { continue }
         try {
             foreach ($pm in $physicalMonitors) {
-                if (-not $pm -or -not $pm.Handle) { continue }
-                $ip = $pm.Handle -as [IntPtr]
-                if ($ip -eq $null -or $ip -eq [IntPtr]::Zero) { continue }
+                $ip = $pm.Handle
+                if ($null -eq $ip -or [IntPtr]::Zero -eq $ip) { continue }
                 $pmSafe = [pscustomobject]@{ Handle = $ip; Description = $pm.Description }
                 $wmiMonitor = if ($monitorIndex -lt $WmiMonitors.Count) { $WmiMonitors[$monitorIndex] } else { $null }
                 & $Action $pmSafe $wmiMonitor ([int]$monitorIndex)
