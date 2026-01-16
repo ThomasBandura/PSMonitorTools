@@ -22,12 +22,17 @@ function ForEach-PhysicalMonitor {
     )
 
     $ConvertToString = { -join ($args[0] | Where-Object {$_} | ForEach-Object {[char]$_}) }
-    $WmiMonitors = @(Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Sort-Object InstanceName)
+    $WmiMonitorsList = [System.Collections.Generic.List[psobject]]::new()
+    Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Sort-Object InstanceName | ForEach-Object { $WmiMonitorsList.Add($_) }
 
     $monitorIndex = 0
     $handles = try { [PSMonitorToolsHelper]::GetMonitorHandles() } catch { @() }
     foreach ($h in $handles) {
         if (-not $h) { continue }
+
+        $devId = $null
+        try { $devId = [PSMonitorToolsHelper]::GetMonitorDevicePath($h) } catch {}
+
         $physicalMonitors = [PSMonitorToolsHelper]::GetPhysicalMonitors($h)
         if (-not $physicalMonitors) { continue }
         try {
@@ -35,7 +40,45 @@ function ForEach-PhysicalMonitor {
                 $ip = $pm.Handle
                 if ($null -eq $ip) { continue }
                 $pmSafe = [pscustomobject]@{ Handle = $ip; Description = $pm.Description }
-                $wmiMonitor = if ($monitorIndex -lt $WmiMonitors.Count) { $WmiMonitors[$monitorIndex] } else { $null }
+                
+                $wmiMonitor = $null
+                
+                # Check for Device Interface Path (EDD_GET_DEVICE_INTERFACE_NAME)
+                # Format: \\?\DISPLAY#HwId#InstanceId#{InterfaceClassGuid}
+                if ($devId -and $devId.StartsWith("\\?\")) {
+                    $parts = $devId.Split('#')
+                    if ($parts.Count -ge 3) {
+                        # Construct WMI InstanceName style: DISPLAY\HwId\InstanceId
+                        # parts[1] is HwId (e.g. DELA0EC)
+                        # parts[2] is InstanceId (e.g. 5&30d2eb97&0&UID256) - DevicePath might differ slightly from WMI
+                        
+                        $baseInstanceName = "DISPLAY\$($parts[1])\$($parts[2])"
+                        
+                        # 1. Try exact match
+                        $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq $baseInstanceName } | Select-Object -First 1
+
+                        # 2. Try adding _0 suffix (common WMI behavior where duplicate display instances get indexed)
+                        if (-not $wmiMonitor) {
+                             $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq "${baseInstanceName}_0" } | Select-Object -First 1
+                        }
+                    }
+                }
+                
+                # Fallback: Loose matching if exact match not found or old path format
+                if (-not $wmiMonitor -and $devId -and ($devId -match 'MONITOR\\([^\\]+)')) {
+                    $hwId = $matches[1]
+                    $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -like "*$hwId*" } | Select-Object -First 1
+                }
+                
+                if (-not $wmiMonitor -and $WmiMonitorsList.Count -gt 0) {
+                     # Last resort: take the first one available
+                     $wmiMonitor = $WmiMonitorsList[0] 
+                }
+
+                if ($wmiMonitor) {
+                    $WmiMonitorsList.Remove($wmiMonitor) | Out-Null
+                }
+
                 & $Action $pmSafe $wmiMonitor ([int]$monitorIndex)
                 $monitorIndex++
             }

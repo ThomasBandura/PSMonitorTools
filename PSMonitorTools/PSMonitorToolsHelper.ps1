@@ -12,11 +12,52 @@ public struct PhysicalMonitor {
     public string Description;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct MONITORINFOEX
+{
+    public int cbSize;
+    public RECT rcMonitor;
+    public RECT rcWork;
+    public int dwFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string szDevice;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct RECT
+{
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct DISPLAY_DEVICE
+{
+    public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceString;
+    public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceKey;
+}
+
 public delegate bool MonitorEnumDelegate(IntPtr hMonitor, IntPtr hdcMonitor, IntPtr lprcMonitor, IntPtr dwData);
 
 public static class PSMonitorToolsHelper {
     [DllImport("user32.dll")]
     public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumDelegate lpfnEnum, IntPtr dwData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool EnumDisplayDevices(string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
 
     [DllImport("dxva2.dll", SetLastError = true)]
     public static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, out uint pdwNumberOfPhysicalMonitors);
@@ -47,6 +88,24 @@ public static class PSMonitorToolsHelper {
             StringBuilder sb = new StringBuilder((int)length);
             if (CapabilitiesRequestAndCapabilitiesReply(hMonitor, sb, length)) {
                 return sb.ToString();
+            }
+        }
+        return null;
+    }
+
+    public static string GetMonitorDevicePath(IntPtr hMonitor) {
+        MONITORINFOEX mi = new MONITORINFOEX();
+        mi.cbSize = Marshal.SizeOf(mi);
+        if (GetMonitorInfo(hMonitor, ref mi)) {
+            DISPLAY_DEVICE dd = new DISPLAY_DEVICE();
+            dd.cb = Marshal.SizeOf(dd);
+            // 0x1 = EDD_GET_DEVICE_INTERFACE_NAME
+            if (EnumDisplayDevices(mi.szDevice, 0, ref dd, 0x1)) {
+                return dd.DeviceID;
+            }
+             // Fallback to default if interface name fails (though unlikely for active monitors)
+            if (EnumDisplayDevices(mi.szDevice, 0, ref dd, 0)) {
+                return dd.DeviceID;
             }
         }
         return null;
