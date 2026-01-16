@@ -48,31 +48,12 @@ function ForEach-PhysicalMonitor {
                 if ($devId -and $devId.StartsWith("\\?\")) {
                     $parts = $devId.Split('#')
                     if ($parts.Count -ge 3) {
-                        # Construct WMI InstanceName style: DISPLAY\HwId\InstanceId
-                        # parts[1] is HwId (e.g. DELA0EC)
-                        # parts[2] is InstanceId (e.g. 5&30d2eb97&0&UID256) - DevicePath might differ slightly from WMI
-                        
                         $baseInstanceName = "DISPLAY\$($parts[1])\$($parts[2])"
-                        
-                        # 1. Try exact match
                         $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq $baseInstanceName } | Select-Object -First 1
-
-                        # 2. Try adding _0 suffix (common WMI behavior where duplicate display instances get indexed)
                         if (-not $wmiMonitor) {
                              $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq "${baseInstanceName}_0" } | Select-Object -First 1
                         }
                     }
-                }
-                
-                # Fallback: Loose matching if exact match not found or old path format
-                if (-not $wmiMonitor -and $devId -and ($devId -match 'MONITOR\\([^\\]+)')) {
-                    $hwId = $matches[1]
-                    $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -like "*$hwId*" } | Select-Object -First 1
-                }
-                
-                if (-not $wmiMonitor -and $WmiMonitorsList.Count -gt 0) {
-                     # Last resort: take the first one available
-                     $wmiMonitor = $WmiMonitorsList[0] 
                 }
 
                 if ($wmiMonitor) {
