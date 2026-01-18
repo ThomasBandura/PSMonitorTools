@@ -251,8 +251,23 @@ function Switch-MonitorInput {
             $currentLeftVal = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currL, [ref]$maxL)) { $currL -band 0xFF } else { 0 }
             $currentRightVal = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currR, [ref]$maxR)) { $currR -band 0xFF } else { 0 }
 
-            $targetLeftKey = if ($doSetLeft) { [uint32]$InputLeft } else { $currentLeftVal }
-            $targetRightKey = if ($doSetRight) { [uint32]$InputRight } else { $currentRightVal }
+            if ($doSetLeft) {
+                $targetLeftKey = [uint32]$InputLeft
+            } else {
+                $currL = 0; $maxL = 0
+                $targetLeftKey = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currL, [ref]$maxL)) { 
+                    $currL -band 0xFF 
+                } else { 0 }
+            }
+
+            if ($doSetRight) {
+                $targetRightKey = [uint32]$InputRight
+            } else {
+                $currR = 0; $maxR = 0
+                $targetRightKey = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currR, [ref]$maxR)) { 
+                    $currR -band 0xFF 
+                } else { 0 }
+            }
 
             if ($targetLeftKey -ne 0 -and $targetRightKey -ne 0 -and $targetLeftKey -eq $targetRightKey) {
                 Write-Error ("Invalid PBP Configuration: Input Left (0x{0:x}) cannot be the same as Input Right (0x{1:x})." -f $targetLeftKey, $targetRightKey)
