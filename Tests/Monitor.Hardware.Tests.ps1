@@ -202,4 +202,119 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             $state.InputLeft | Should -Be 'DisplayPort'
         }
     }
+
+    Context 'Audio, Contrast and Brightness' {
+        
+        It 'Controls Audio Mute State' {
+            if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
+
+            $initial = Get-MonitorAudio -MonitorName $TestMonitorName
+            if ($null -eq $initial -or $null -eq $initial.AudioEnabled) {
+                 Write-Warning "Audio control not supported or failed to read."
+                 Set-ItResult -Skipped
+            } else {
+                $origState = $initial.AudioEnabled
+                Write-Host "Initial Audio Mute State: $origState" -ForegroundColor Gray
+
+                try {
+                    if ($origState) {
+                        # Was Enabled (Unmuted), so Disable (Mute) it
+                        Disable-MonitorAudio -MonitorName $TestMonitorName | Should -BeTrue
+                        Start-Sleep -Seconds 2
+                        (Get-MonitorAudio -MonitorName $TestMonitorName).AudioEnabled | Should -BeFalse
+                    } else {
+                        # Was Disabled (Muted), so Enable (Unmute) it
+                        Enable-MonitorAudio -MonitorName $TestMonitorName | Should -BeTrue
+                        Start-Sleep -Seconds 2
+                        (Get-MonitorAudio -MonitorName $TestMonitorName).AudioEnabled | Should -BeTrue
+                    }
+                }
+                finally {
+                    # Restore
+                    if ($origState) {
+                        Enable-MonitorAudio -MonitorName $TestMonitorName | Out-Null
+                    } else {
+                        Disable-MonitorAudio -MonitorName $TestMonitorName | Out-Null
+                    }
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+
+        It 'Controls Audio Volume' {
+            if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
+
+            $initial = Get-MonitorAudioVolume -MonitorName $TestMonitorName
+            if ($null -eq $initial -or $null -eq $initial.Volume) {
+                 Write-Warning "Volume control not supported or failed to read."
+                 Set-ItResult -Skipped
+            } else {
+                $origVol = $initial.Volume
+                Write-Host "Initial Volume: $origVol" -ForegroundColor Gray
+                
+                # Target: +10 or -10, bounded 0-100
+                $target = if ($origVol -ge 50) { $origVol - 10 } else { $origVol + 10 }
+
+                try {
+                    Set-MonitorAudioVolume -MonitorName $TestMonitorName -Volume $target | Should -BeTrue
+                    Start-Sleep -Seconds 2
+                    (Get-MonitorAudioVolume -MonitorName $TestMonitorName).Volume | Should -Be $target
+                }
+                finally {
+                    Set-MonitorAudioVolume -MonitorName $TestMonitorName -Volume $origVol | Out-Null
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+
+        It 'Controls Contrast' {
+            if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
+
+            $initial = Get-MonitorContrast -MonitorName $TestMonitorName
+            if ($null -eq $initial -or $null -eq $initial.Contrast) {
+                 Write-Warning "Contrast control not supported or failed to read."
+                 Set-ItResult -Skipped
+            } else {
+                $origContrast = $initial.Contrast
+                Write-Host "Initial Contrast: $origContrast" -ForegroundColor Gray
+
+                $target = if ($origContrast -ge 50) { $origContrast - 10 } else { $origContrast + 10 }
+
+                try {
+                    Set-MonitorContrast -MonitorName $TestMonitorName -Contrast $target | Should -BeTrue
+                    Start-Sleep -Seconds 2
+                    (Get-MonitorContrast -MonitorName $TestMonitorName).Contrast | Should -Be $target
+                }
+                finally {
+                    Set-MonitorContrast -MonitorName $TestMonitorName -Contrast $origContrast | Out-Null
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+
+        It 'Controls Brightness' {
+            if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
+
+            $initial = Get-MonitorBrightness -MonitorName $TestMonitorName
+            if ($null -eq $initial -or $null -eq $initial.Brightness) {
+                 Write-Warning "Brightness control not supported or failed to read."
+                 Set-ItResult -Skipped
+            } else {
+                $origBrightness = $initial.Brightness
+                Write-Host "Initial Brightness: $origBrightness" -ForegroundColor Gray
+
+                $target = if ($origBrightness -ge 50) { $origBrightness - 10 } else { $origBrightness + 10 }
+
+                try {
+                    Set-MonitorBrightness -MonitorName $TestMonitorName -Brightness $target | Should -BeTrue
+                    Start-Sleep -Seconds 2
+                    (Get-MonitorBrightness -MonitorName $TestMonitorName).Brightness | Should -Be $target
+                }
+                finally {
+                    Set-MonitorBrightness -MonitorName $TestMonitorName -Brightness $origBrightness | Out-Null
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+    }
 }
