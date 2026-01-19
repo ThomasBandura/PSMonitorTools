@@ -6,6 +6,8 @@ $PSScriptRoot = if ($scriptPath) { Split-Path -Parent $scriptPath } else { Split
 
 . "$PSScriptRoot\PSMonitorToolsHelper.ps1"
 
+#region Enums and Constants
+
 enum MonitorInput {
     Hdmi1 = 0x11
     Hdmi2 = 0x12
@@ -13,15 +15,45 @@ enum MonitorInput {
     UsbC = 0x1b
 }
 
-# Internal helper: enumerate physical monitors and invoke an action scriptblock for each
+# VCP Feature Codes (DDC/CI Standard)
+$script:VcpCodes = @{
+    InputSource = 0x60          # Primary/Left Input Select
+    AudioVolume = 0x62          # Speaker Volume
+    Brightness = 0x10           # Luminance
+    Contrast = 0x12             # Contrast
+    AudioMute = 0x8D            # Audio Mute/Unmute
+    Firmware = 0xC9             # Firmware Version
+    PbpMode = 0xE9              # PBP/PIP Mode
+    PbpRightInput = 0xE8        # PBP Right Input Source
+}
+
+$script:PbpModeValues = @{
+    Off = 0x00
+    On = 0x24
+    LeftInputMask = 0xF00
+}
+
+#endregion
+
+#region Private Helper Functions
 
 function Convert-WmiString {
+    <#
+    .SYNOPSIS
+        Converts WMI byte array to string
+    #>
     param($WmiOutput)
     if (-not $WmiOutput) { return $null }
     -join ($WmiOutput | Where-Object {$_} | ForEach-Object {[char]$_})
 }
 
 function ForEach-PhysicalMonitor {
+    <#
+    .SYNOPSIS
+        Enumerates physical monitors and invokes an action scriptblock for each
+    .DESCRIPTION
+        Internal helper function to iterate through all physical monitors with optional filtering by name
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, ValueFromPipeline=$false)]
@@ -90,8 +122,196 @@ function ForEach-PhysicalMonitor {
     }
 }
 
+function Invoke-VcpGet {
+    <#
+    .SYNOPSIS
+        Helper function to get VCP feature value with standardized error handling
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle,
+        
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$FeatureName
+    )
+    
+    [uint32]$currentValue = 0
+    [uint32]$maxValue = 0
+    
+    if ([PSMonitorToolsHelper]::GetVcpFeature($MonitorHandle, $VcpCode, [ref]$currentValue, [ref]$maxValue)) {
+        return $currentValue
+    }
+    
+    Write-Verbose ("Failed to read VCP code 0x{0:X2} ($FeatureName)" -f $VcpCode)
+    return $null
+}
+
+function Invoke-VcpSet {
+    <#
+    .SYNOPSIS
+        Helper function to set VCP feature value with retry logic and verification
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle,
+        
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode,
+        
+        [Parameter(Mandatory=$true)]
+        [uint32]$Value,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$MonitorDescription,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$FeatureName = "VCP Feature",
+        
+        [Parameter(Mandatory=$false)]
+        [int]$MaxRetries = 5,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$SkipVerification
+    )
+    
+    # Retry logic for SET command (Monitor might be busy/switching modes)
+    $setSuccess = $false
+    $attempt = 1
+
+    while (-not $setSuccess -and $attempt -le $MaxRetries) {
+        if ([PSMonitorToolsHelper]::SetVCPFeature($MonitorHandle, $VcpCode, $Value)) {
+            $setSuccess = $true
+        } else {
+            Write-Verbose "Attempt $attempt/$MaxRetries to set $FeatureName failed (Monitor busy?). Retrying in 1s..."
+            Start-Sleep -Seconds 1
+            $attempt++
+        }
+    }
+
+    if (-not $setSuccess) {
+        Write-Error "Failed to set $FeatureName on $MonitorDescription after $MaxRetries attempts."
+        return $false
+    }
+    
+    Write-Verbose ("Set $FeatureName on $MonitorDescription to 0x{0:X}" -f $Value)
+    
+    # Verification Loop (if not skipped)
+    if (-not $SkipVerification) {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $verified = $false
+        while ($sw.Elapsed.TotalSeconds -lt 10) {
+            Start-Sleep -Milliseconds 500
+            $current = Invoke-VcpGet -MonitorHandle $MonitorHandle -VcpCode $VcpCode -FeatureName $FeatureName
+            if ($null -ne $current -and (($current -band 0xFF) -eq ($Value -band 0xFF))) {
+                $verified = $true
+                Write-Verbose ("Verified $FeatureName switched to 0x{0:X}" -f ($current -band 0xFF))
+                break
+            }
+        }
+        $sw.Stop()
+        
+        if (-not $verified) {
+            Write-Warning ("Monitor '$MonitorDescription' did not confirm change of $FeatureName to 0x{0:X} within 10 seconds." -f $Value)
+        }
+    }
+    
+    return $true
+}
+
+function Get-MonitorVcpValue {
+    <#
+    .SYNOPSIS
+        Generic helper to get a VCP value from all matching monitors
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$PropertyName,
+        
+        [Parameter(Mandatory=$false)]
+        [scriptblock]$ValueTransform
+    )
+    
+    $results = [System.Collections.Generic.List[psobject]]::new()
+
+    ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
+        param($pm, $wmiMonitor, $idx, $cap, $model)
+        
+        $value = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $VcpCode -FeatureName $PropertyName
+        
+        if ($null -ne $ValueTransform) {
+            $value = & $ValueTransform $value
+        }
+        
+        $obj = [pscustomobject]@{
+            Name = $pm.Description
+            Model = $model
+            $PropertyName = $value
+        }
+        $results.Add($obj) | Out-Null
+    }
+
+    return $results
+}
+
+function Set-MonitorVcpValue {
+    <#
+    .SYNOPSIS
+        Generic helper to set a VCP value on matching monitors
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode,
+        
+        [Parameter(Mandatory=$true)]
+        [uint32]$Value,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$FeatureName,
+        
+        [Parameter(Mandatory=$true)]
+        $CmdletContext,
+        
+        [Parameter(Mandatory=$false)]
+        [switch]$SkipVerification
+    )
+    
+    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
+        param($pm, $wmiMonitor, $idx)
+        
+        $action = "Set $FeatureName to 0x{0:X}" -f $Value
+        if ($CmdletContext.ShouldProcess($pm.Description, $action)) {
+            return Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $VcpCode -Value $Value `
+                -MonitorDescription $pm.Description -FeatureName $FeatureName -SkipVerification:$SkipVerification
+        }
+        return $false
+    }
+
+    return ($results -contains $true)
+}
+
+#endregion
+
+#region Public Functions
 
 function Get-MonitorInfo {
+    <#
+    .SYNOPSIS
+        Retrieves detailed information about physical monitors
+    .PARAMETER MonitorName
+        Optional filter to match specific monitor by name, model, or manufacturer
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false, Position = 0)]
@@ -102,14 +322,18 @@ function Get-MonitorInfo {
     ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
         param($physicalMonitor, $wmiMonitor, $idx, $cap, $calculatedModel, $wmiName)
 
-        [uint32]$currentValue = 0; [uint32]$maxValue = 0
         $name = $physicalMonitor.Description
-        
         $model = if ($calculatedModel) { $calculatedModel } else { $wmiName }
-
         $serial = if ($wmiMonitor) { Convert-WmiString $wmiMonitor.SerialNumberID } else { $null }
         $manufacturer = if ($wmiMonitor) { Convert-WmiString $wmiMonitor.ManufacturerName } else { $null }
-        if ($physicalMonitor.Handle -and [PSMonitorToolsHelper]::GetVcpFeature($physicalMonitor.Handle, 0xC9, [ref]$currentValue, [ref]$maxValue)) { $firmware = "{0:x}" -f ($currentValue -band 0x7FF) } else { $firmware = $null }
+        
+        # Read firmware version
+        $firmware = $null
+        $fwValue = Invoke-VcpGet -MonitorHandle $physicalMonitor.Handle -VcpCode $script:VcpCodes.Firmware -FeatureName 'Firmware'
+        if ($null -ne $fwValue) {
+            $firmware = "{0:x}" -f ($fwValue -band 0x7FF)
+        }
+        
         $week = if ($wmiMonitor) { $wmiMonitor.WeekOfManufacture } else { $null }
         $year = if ($wmiMonitor) { $wmiMonitor.YearOfManufacture } else { $null }
 
@@ -132,6 +356,12 @@ function Get-MonitorInfo {
 Export-ModuleMember -Function Get-MonitorInfo
 
 function Get-MonitorPBP {
+    <#
+    .SYNOPSIS
+        Gets the PBP (Picture-by-Picture) mode status
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
@@ -141,21 +371,23 @@ function Get-MonitorPBP {
     $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
         param($pm, $wmiMonitor, $idx)
             
-        $curr = 0; $max = 0
-        if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE9, [ref]$curr, [ref]$max)) {
-            # 0x00 usually means PBP Off
-            return ($curr -ne 0x00)
-        }
-        return $false
+        $value = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
+        # 0x00 usually means PBP Off
+        return ($null -ne $value -and $value -ne $script:PbpModeValues.Off)
     }
     
-    if ($results -contains $true) { return $true }
-    return $false
+    return ($results -contains $true)
 }
 
 Export-ModuleMember -Function Get-MonitorPBP
 
 function Get-MonitorInput {
+    <#
+    .SYNOPSIS
+        Gets the current input source(s) of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
@@ -166,26 +398,19 @@ function Get-MonitorInput {
         param($pm, $wmiMonitor, $idx, $cap, $model)
             
         # Check PBP Status
-        $pbpActive = $false
-        $currPbp = 0; $maxPbp = 0
-        if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE9, [ref]$currPbp, [ref]$maxPbp)) {
-            $pbpActive = ($currPbp -ne 0x00)
-        }
-
-        $currentLeftVal = 0; $maxL = 0
-        $currentRightVal = 0; $maxR = 0
+        $pbpValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
+        $pbpActive = ($null -ne $pbpValue -and $pbpValue -ne $script:PbpModeValues.Off)
         
-        # 0x60 is standard Input Select (Left/Primary)
-        $hasLeft = [PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currentLeftVal, [ref]$maxL)
+        # Get Left/Primary Input
+        $leftValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.InputSource -FeatureName 'Input Source'
+        $leftCode = if ($null -ne $leftValue) { $leftValue -band 0xFF } else { $null }
         
-        # PBP Right Input (VCP 0xE8)
-        $hasRight = $false
+        # Get Right/Secondary Input (only if PBP is active)
+        $rightCode = $null
         if ($pbpActive) {
-            $hasRight = [PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currentRightVal, [ref]$maxR)
+            $rightValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpRightInput -FeatureName 'PBP Right Input'
+            $rightCode = if ($null -ne $rightValue) { $rightValue -band 0xFF } else { $null }
         }
-
-        $leftCode = if ($hasLeft) { $currentLeftVal -band 0xFF } else { $null }
-        $rightCode = if ($hasRight) { $currentRightVal -band 0xFF } else { $null }
 
         $leftInputSpec = if ($null -ne $leftCode) {
             if ([Enum]::IsDefined([MonitorInput], [int]$leftCode)) { [MonitorInput][int]$leftCode } else { "Unknown (0x{0:X2})" -f $leftCode }
@@ -209,7 +434,99 @@ function Get-MonitorInput {
 
 Export-ModuleMember -Function Get-MonitorInput
 
+function Wait-MonitorInput {
+    <#
+    .SYNOPSIS
+        Waits for a monitor to reach a specific input state with retry logic
+    .DESCRIPTION
+        This function repeatedly checks the monitor input state until a specified condition is met
+        or the maximum number of retries is reached. Useful for waiting after input switches
+        when DDC/CI communication may be temporarily unavailable.
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    .PARAMETER Condition
+        A scriptblock that receives the monitor state and returns $true when the desired state is reached
+    .PARAMETER MaxRetries
+        Maximum number of retry attempts (default: 5)
+    .PARAMETER RetryDelaySeconds
+        Delay in seconds between retry attempts (default: 2)
+    .PARAMETER TimeoutSeconds
+        Alternative to MaxRetries: total timeout in seconds
+    .EXAMPLE
+        Wait-MonitorInput -MonitorName 'Dell' -Condition { param($s) $s.InputLeft -eq 'Hdmi1' }
+    .EXAMPLE
+        Wait-MonitorInput -MonitorName 'Dell' -Condition { param($s) $s.PBP -and $s.InputRight -eq 'UsbC' } -MaxRetries 10
+    #>
+    [CmdletBinding(DefaultParameterSetName='Retries')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorName,
+        
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Condition,
+        
+        [Parameter(ParameterSetName='Retries')]
+        [int]$MaxRetries = 5,
+        
+        [Parameter(ParameterSetName='Retries')]
+        [Parameter(ParameterSetName='Timeout')]
+        [int]$RetryDelaySeconds = 2,
+        
+        [Parameter(ParameterSetName='Timeout')]
+        [int]$TimeoutSeconds
+    )
+    
+    if ($PSCmdlet.ParameterSetName -eq 'Timeout') {
+        $MaxRetries = [Math]::Ceiling($TimeoutSeconds / $RetryDelaySeconds)
+    }
+    
+    $attempt = 0
+    $lastState = $null
+    
+    while ($attempt -lt $MaxRetries) {
+        if ($attempt -gt 0) {
+            Start-Sleep -Seconds $RetryDelaySeconds
+        }
+        
+        try {
+            $state = Get-MonitorInput -MonitorName $MonitorName -ErrorAction Stop
+            $lastState = $state
+            
+            # Check if condition is met
+            if (& $Condition $state) {
+                Write-Verbose "Monitor state condition met after $($attempt + 1) attempt(s)"
+                return $state
+            }
+        } catch {
+            Write-Warning "Failed to read monitor state (attempt $($attempt + 1)/$MaxRetries): $_"
+        }
+        
+        $attempt++
+    }
+    
+    # Condition not met within retry limit
+    if ($lastState) {
+        Write-Warning "Monitor state condition not met after $MaxRetries attempts. Last state: PBP=$($lastState.PBP), Left=$($lastState.InputLeft), Right=$($lastState.InputRight)"
+    } else {
+        Write-Warning "Failed to read monitor state after $MaxRetries attempts."
+    }
+    
+    return $lastState
+}
+
+# Wait-MonitorInput is an internal helper function, not exported
+
 function Switch-MonitorInput {
+    <#
+    .SYNOPSIS
+        Switches the monitor input source(s)
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    .PARAMETER InputLeft
+        The input source for the left/primary display
+    .PARAMETER InputRight
+        The input source for the right/secondary display (PBP mode only)
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
@@ -240,250 +557,212 @@ function Switch-MonitorInput {
         $success = $true
 
         # Check PBP Status
-        $pbpActive = $false
-        $currPbp = 0; $maxPbp = 0
-        if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE9, [ref]$currPbp, [ref]$maxPbp)) {
-            $pbpActive = ($currPbp -ne 0x00)
-        }
+        $pbpValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
+        $pbpActive = ($null -ne $pbpValue -and $pbpValue -ne $script:PbpModeValues.Off)
 
+        # Get current values for collision detection
+        $currentLeftVal = 0
+        $currentRightVal = 0
         if ($pbpActive) {
-            $currL = 0; $maxL = 0; $currR = 0; $maxR = 0
-            $currentLeftVal = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currL, [ref]$maxL)) { $currL -band 0xFF } else { 0 }
-            $currentRightVal = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currR, [ref]$maxR)) { $currR -band 0xFF } else { 0 }
+            $leftVal = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.InputSource -FeatureName 'Input Source'
+            $rightVal = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpRightInput -FeatureName 'PBP Right Input'
+            $currentLeftVal = if ($null -ne $leftVal) { $leftVal -band 0xFF } else { 0 }
+            $currentRightVal = if ($null -ne $rightVal) { $rightVal -band 0xFF } else { 0 }
 
-            if ($doSetLeft) {
-                $targetLeftKey = [uint32]$InputLeft
-            } else {
-                $currL = 0; $maxL = 0
-                $targetLeftKey = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$currL, [ref]$maxL)) { 
-                    $currL -band 0xFF 
-                } else { 0 }
-            }
+            # Determine target values
+            $targetLeftKey = if ($doSetLeft) { [uint32]$InputLeft } else { $currentLeftVal }
+            $targetRightKey = if ($doSetRight) { [uint32]$InputRight } else { $currentRightVal }
 
-            if ($doSetRight) {
-                $targetRightKey = [uint32]$InputRight
-            } else {
-                $currR = 0; $maxR = 0
-                $targetRightKey = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0xE8, [ref]$currR, [ref]$maxR)) { 
-                    $currR -band 0xFF 
-                } else { 0 }
-            }
-
+            # Validate: Left and Right cannot be the same in PBP mode
             if ($targetLeftKey -ne 0 -and $targetRightKey -ne 0 -and $targetLeftKey -eq $targetRightKey) {
                 Write-Error ("Invalid PBP Configuration: Input Left (0x{0:x}) cannot be the same as Input Right (0x{1:x})." -f $targetLeftKey, $targetRightKey)
                 return $false
             }
         }
         
-        # Helper for Set and Verify
+        # Helper for Set and Verify (uses Invoke-VcpSet)
         $FnSetVerify = {
             param($Code, $Val, $Desc)
-            $action = "Set $Desc input to 0x{0:X}" -f $Val
+            return Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $Code -Value $Val `
+                -MonitorDescription $pm.Description -FeatureName $Desc
+        }
+
+        # Define steps
+        $steps = [System.Collections.Generic.List[psobject]]::new()
+        if ($doSetLeft) { 
+            $steps.Add([pscustomobject]@{ Type="Left"; Code=$script:VcpCodes.InputSource; Input=[uint32]$InputLeft; MaskPbp=$true }) 
+        }
+        if ($doSetRight) { 
+            $steps.Add([pscustomobject]@{ Type="Right"; Code=$script:VcpCodes.PbpRightInput; Input=[uint32]$InputRight; MaskPbp=$false }) 
+        }
+
+        # Smart Ordering: Collision Detection
+        # If Target Left matches Current Right, we must switch Right FIRST to free up the input.
+        if ($pbpActive -and $doSetLeft -and $doSetRight) {
+            if (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) {
+                Write-Verbose "Smart Ordering: Target Left matches Current Right. Switching Right input FIRST to avoid collision."
+                $steps.Reverse()
+            }
+        }
+
+        foreach ($step in $steps) {
+            $val = $step.Input
             
-            if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-                # Retry logic for SET command (Monitor might be busy/switching modes)
-                $setSuccess = $false
-                $attempt = 1
-                $maxAttempts = 5
-
-                while (-not $setSuccess -and $attempt -le $maxAttempts) {
-                    if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, $Code, $Val)) {
-                        $setSuccess = $true
-                    } else {
-                        Write-Verbose "Attempt $attempt/$maxAttempts to set $Desc input failed (Monitor busy?). Retrying in 1s..."
-                        Start-Sleep -Seconds 1
-                        $attempt++
-                    }
-                }
-
-                if ($setSuccess) {
-                        Write-Verbose ("Set $Desc input on $($pm.Description) to 0x{0:X}" -f $Val)
-                        
-                        # Verification Loop
-                        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                        $verified = $false
-                        while ($sw.Elapsed.TotalSeconds -lt 10) {
-                            Start-Sleep -Milliseconds 500
-                            $c = 0; $m = 0
-                            if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, $Code, [ref]$c, [ref]$m)) {
-                                if (($c -band 0xFF) -eq ($Val -band 0xFF)) {
-                                    $verified = $true
-                                    Write-Verbose ("Verified $Desc input switched to 0x{0:X}" -f ($c -band 0xFF))
-                                    break
-                                }
-                            }
-                        }
-                        $sw.Stop()
-                        
-                        if (-not $verified) {
-                            Write-Warning ("Monitor '$($pm.Description)' did not confirm switch of $Desc input to '0x{0:X}' within 10 seconds." -f $Val)
-                        }
-                        return $true
-                    } else {
-                        Write-Error "Failed to set $Desc input on $($pm.Description) after $maxAttempts attempts."
-                        return $false
-                    }
-                } else {
-                    return $true
-                }
+            # If PBP is active, mask Left input with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
+            if ($pbpActive -and $step.MaskPbp) {
+                $val = $script:PbpModeValues.LeftInputMask + $val
+                Write-Verbose ("PBP is active. Using masked value 0x{0:X} for Left Input." -f $val)
             }
 
-            # Define steps
-            $steps = [System.Collections.Generic.List[psobject]]::new()
-            if ($doSetLeft) { 
-                $steps.Add([pscustomobject]@{ Type="Left"; Code=0x60; Input=[uint32]$InputLeft; MaskPbp=$true }) 
-            }
-            if ($doSetRight) { 
-                $steps.Add([pscustomobject]@{ Type="Right"; Code=0xE8; Input=[uint32]$InputRight; MaskPbp=$false }) 
-            }
+            $desc = if ($step.Type -eq "Left") { "Primary/Left Input" } else { "Secondary/Right Input" }
 
-            # Smart Ordering: Collision Detection
-            # If Target Left matches Current Right, we must switch Right FIRST to free up the input.
-            if ($pbpActive -and $doSetLeft -and $doSetRight) {
-                # CurrentRightVal comes from the PBP check block above
-                if (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) {
-                    Write-Verbose "Smart Ordering: Target Left matches Current Right. Switching Right input FIRST to avoid collision."
-                    $steps.Reverse()
-                }
-            }
-
-            foreach ($step in $steps) {
-                $val = $step.Input
-                
-                # If PBP is active, mask Left input with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
-                if ($pbpActive -and $step.MaskPbp) {
-                    $val = 0xF00 + $val
-                    Write-Verbose ("PBP is active. Using masked value 0x{0:X} for Left Input." -f $val)
-                }
-
-                $desc = if ($step.Type -eq "Left") { "Primary/Left" } else { "Secondary/Right" }
-
+            if ($cmdletContext.ShouldProcess($pm.Description, ("Set $desc to 0x{0:X}" -f $val))) {
                 if (-not (& $FnSetVerify $step.Code $val $desc)) {
                     $success = $false
                 }
+            } else {
+                return $false
             }
+        }
+        
+        # Verification: Wait and verify the actual state matches what we requested
+        if ($success) {
+            Write-Verbose "Verifying monitor state..."
+            $verified = $false
+            $verifyRetry = 0
+            $maxVerifyRetries = 8
             
-            # 3. Wait for Ready State (Post-Switch Stability)
-            # Ensure function doesn't return until monitor accepts DDC commands again.
-            if ($success) {
-                Write-Verbose "Waiting for monitor to stabilize..."
-                $ready = $false
-                $waitRetry = 0
-                while (-not $ready -and $waitRetry -lt 20) { # Max 10 seconds wait (20 * 500ms)
-                    Start-Sleep -Milliseconds 500
-                    # Test Read on Input Select (0x60). If this succeeds, monitor is DDC-ready.
-                    $c = 0; $m = 0
-                    if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x60, [ref]$c, [ref]$m)) {
-                        $ready = $true
-                        Write-Verbose "Monitor is ready for new commands."
-                    } else {
-                        Write-Verbose "Monitor busy (DDC read failed). Waiting..."
-                        $waitRetry++
+            while (-not $verified -and $verifyRetry -lt $maxVerifyRetries) {
+                Start-Sleep -Seconds 1
+                
+                try {
+                    # Re-read current state
+                    $actualLeftRaw = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.InputSource -FeatureName 'Input Source'
+                    
+                    if ($null -eq $actualLeftRaw) {
+                        Write-Verbose "Monitor busy (DDC read failed). Retry $($verifyRetry + 1)/$maxVerifyRetries"
+                        $verifyRetry++
+                        continue
                     }
+                    
+                    $actualLeft = $actualLeftRaw -band 0xFF
+                    
+                    # Check if Left input matches (if we set it)
+                    $leftMatches = $true
+                    if ($doSetLeft) {
+                        $expectedLeft = [uint32]$InputLeft -band 0xFF
+                        $leftMatches = ($actualLeft -eq $expectedLeft)
+                        if (-not $leftMatches) {
+                            Write-Verbose "Left input mismatch: Expected 0x$($expectedLeft.ToString('X')), Got 0x$($actualLeft.ToString('X')). Retry $($verifyRetry + 1)/$maxVerifyRetries"
+                        }
+                    }
+                    
+                    # Check if Right input matches (if we set it and PBP is active)
+                    $rightMatches = $true
+                    if ($doSetRight -and $pbpActive) {
+                        $actualRightRaw = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpRightInput -FeatureName 'PBP Right Input'
+                        if ($null -ne $actualRightRaw) {
+                            $actualRight = $actualRightRaw -band 0xFF
+                            $expectedRight = [uint32]$InputRight -band 0xFF
+                            $rightMatches = ($actualRight -eq $expectedRight)
+                            if (-not $rightMatches) {
+                                Write-Verbose "Right input mismatch: Expected 0x$($expectedRight.ToString('X')), Got 0x$($actualRight.ToString('X')). Retry $($verifyRetry + 1)/$maxVerifyRetries"
+                            }
+                        }
+                    }
+                    
+                    if ($leftMatches -and $rightMatches) {
+                        $verified = $true
+                        Write-Verbose "Input state verified after $($verifyRetry + 1) attempt(s)"
+                    } else {
+                        $verifyRetry++
+                    }
+                } catch {
+                    Write-Verbose "Verification read failed: $_. Retry $($verifyRetry + 1)/$maxVerifyRetries"
+                    $verifyRetry++
                 }
             }
+            
+            if (-not $verified) {
+                Write-Error "Failed to verify input state on $($pm.Description) after $maxVerifyRetries attempts."
+                $success = $false
+            }
+        }
 
-            return $success
+        return $success
     }
 
-    if ($results -contains $true) { return $true }
-    return $false
+    return ($results -contains $true)
 }
 
 Export-ModuleMember -Function Switch-MonitorInput
 
 
 function Enable-MonitorPBP {
+    <#
+    .SYNOPSIS
+        Enables PBP (Picture-by-Picture) mode on the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        # VCP 0xE9 is commonly used for PBP/PIP. 0x24 is a common PBP mode.
-        $val = 0x24 
-        $action = "Enable PBP (0xE9 -> 0x24)"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0xE9, $val)) {
-                Write-Verbose ("Enabled PBP on $($pm.Description)")
-                return $true
-            } else {
-                Throw "Failed to enable PBP on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.PbpMode `
+        -Value $script:PbpModeValues.On -FeatureName "PBP Mode" -CmdletContext $PSCmdlet
 }
 
 Export-ModuleMember -Function Enable-MonitorPBP
 
 function Disable-MonitorPBP {
+    <#
+    .SYNOPSIS
+        Disables PBP (Picture-by-Picture) mode on the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        $val = 0x00
-        $action = "Disable PBP (0xE9 -> 0x00)"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0xE9, $val)) {
-                Write-Verbose ("Disabled PBP on $($pm.Description)")
-                return $true
-            } else {
-                Throw "Failed to disable PBP on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.PbpMode `
+        -Value $script:PbpModeValues.Off -FeatureName "PBP Mode" -CmdletContext $PSCmdlet
 }
 
 Export-ModuleMember -Function Disable-MonitorPBP
 
 function Get-MonitorAudioVolume {
+    <#
+    .SYNOPSIS
+        Gets the audio volume level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx, $cap, $model)
-            
-        $curr = 0; $max = 0
-        $volume = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x62, [ref]$curr, [ref]$max)) { $curr } else { $null }
-        
-        [pscustomobject]@{
-            Name = $pm.Description
-            Model = $model
-            Volume = $volume
-        }
-    }
-
-    $results
+    return Get-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioVolume -PropertyName 'Volume'
 }
 
 Export-ModuleMember -Function Get-MonitorAudioVolume
 
 function Set-MonitorAudioVolume {
+    <#
+    .SYNOPSIS
+        Sets the audio volume level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    .PARAMETER Volume
+        Volume level (0-100)
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
@@ -494,152 +773,98 @@ function Set-MonitorAudioVolume {
         [int]$Volume
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        $val = [uint32]$Volume
-        $action = "Set Volume to $Volume"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x62, $val)) {
-                Write-Verbose ("Set volume on $($pm.Description) to $Volume")
-                return $true
-            } else {
-                Throw "Failed to set volume on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioVolume `
+        -Value ([uint32]$Volume) -FeatureName "Audio Volume" -CmdletContext $PSCmdlet
 }
 
 Export-ModuleMember -Function Set-MonitorAudioVolume
 
 function Get-MonitorAudio {
+    <#
+    .SYNOPSIS
+        Gets the audio mute/unmute status of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx, $cap, $model)
-            
-        $curr = 0; $max = 0
-        $audioStatus = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x8D, [ref]$curr, [ref]$max)) { 
-            # 0x01 = On, 0x00 = Off/Mute.
-            if ($curr -eq 1) { $true } else { $false }
-        } else { $null }
-        
-        [pscustomobject]@{
-            Name = $pm.Description
-            Model = $model
-            AudioEnabled = $audioStatus
-        }
-    }
-
-    $results
+    return Get-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioMute `
+        -PropertyName 'AudioEnabled' -ValueTransform { param($v) if ($null -eq $v) { $null } else { $v -eq 1 } }
 }
 
 Export-ModuleMember -Function Get-MonitorAudio
 
 function Enable-MonitorAudio {
+    <#
+    .SYNOPSIS
+        Unmutes the monitor audio
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
-        $val = 0x01 
-        $action = "Enable Audio (Unmute)"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x8D, $val)) {
-                Write-Verbose ("Enabled audio on $($pm.Description)")
-                return $true
-            } else {
-                Throw "Failed to enable audio on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioMute `
+        -Value 0x01 -FeatureName "Audio (Unmute)" -CmdletContext $PSCmdlet -SkipVerification
 }
 
 Export-ModuleMember -Function Enable-MonitorAudio
 
 function Disable-MonitorAudio {
+    <#
+    .SYNOPSIS
+        Mutes the monitor audio
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
-        $val = 0x00
-        $action = "Disable Audio (Mute)"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x8D, $val)) {
-                Write-Verbose ("Disabled audio on $($pm.Description)")
-                return $true
-            } else {
-                Throw "Failed to disable audio on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioMute `
+        -Value 0x00 -FeatureName "Audio (Mute)" -CmdletContext $PSCmdlet -SkipVerification
 }
 
 Export-ModuleMember -Function Disable-MonitorAudio
 
 function Get-MonitorBrightness {
+    <#
+    .SYNOPSIS
+        Gets the brightness level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx, $cap, $model)
-            
-        $curr = 0; $max = 0
-        # VCP 0x10 = Luminance/Brightness
-        $val = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x10, [ref]$curr, [ref]$max)) { $curr } else { $null }
-        
-        [pscustomobject]@{
-            Name = $pm.Description
-            Model = $model
-            Brightness = $val
-        }
-    }
-
-    $results
+    return Get-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Brightness -PropertyName 'Brightness'
 }
 
 Export-ModuleMember -Function Get-MonitorBrightness
 
 function Set-MonitorBrightness {
+    <#
+    .SYNOPSIS
+        Sets the brightness level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    .PARAMETER Brightness
+        Brightness level (0-100)
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
@@ -650,59 +875,39 @@ function Set-MonitorBrightness {
         [int]$Brightness
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        $val = [uint32]$Brightness
-        $action = "Set Brightness to $Brightness"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            # VCP 0x10 = Luminance/Brightness
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x10, $val)) {
-                Write-Verbose ("Set brightness on $($pm.Description) to $Brightness")
-                return $true
-            } else {
-                Throw "Failed to set brightness on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Brightness `
+        -Value ([uint32]$Brightness) -FeatureName "Brightness" -CmdletContext $PSCmdlet
 }
 
 Export-ModuleMember -Function Set-MonitorBrightness
 
 function Get-MonitorContrast {
+    <#
+    .SYNOPSIS
+        Gets the contrast level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to query
+    #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$MonitorName
     )
 
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx, $cap, $model)
-            
-        $curr = 0; $max = 0
-        # VCP 0x12 = Contrast
-        $val = if ([PSMonitorToolsHelper]::GetVcpFeature($pm.Handle, 0x12, [ref]$curr, [ref]$max)) { $curr } else { $null }
-        
-        [pscustomobject]@{
-            Name = $pm.Description
-            Model = $model
-            Contrast = $val
-        }
-    }
-
-    $results
+    return Get-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Contrast -PropertyName 'Contrast'
 }
 
 Export-ModuleMember -Function Get-MonitorContrast
 
 function Set-MonitorContrast {
+    <#
+    .SYNOPSIS
+        Sets the contrast level of the monitor
+    .PARAMETER MonitorName
+        Name or model of the monitor to configure
+    .PARAMETER Contrast
+        Contrast level (0-100)
+    #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
         [Parameter(Mandatory = $true)]
@@ -713,35 +918,11 @@ function Set-MonitorContrast {
         [int]$Contrast
     )
 
-    $cmdletContext = $PSCmdlet
-
-    $results = ForEach-PhysicalMonitor -MonitorName $MonitorName -Action {
-        param($pm, $wmiMonitor, $idx)
-            
-        $val = [uint32]$Contrast
-        $action = "Set Contrast to $Contrast"
-        if ($cmdletContext.ShouldProcess($pm.Description, $action)) {
-            # VCP 0x12 = Contrast
-            if ([PSMonitorToolsHelper]::SetVCPFeature($pm.Handle, 0x12, $val)) {
-                Write-Verbose ("Set contrast on $($pm.Description) to $Contrast")
-                return $true
-            } else {
-                Throw "Failed to set contrast on $($pm.Description)"
-            }
-        } else {
-            return $false
-        }
-    }
-
-    if ($results -contains $true) { return $true }
-    return $false
+    return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Contrast `
+        -Value ([uint32]$Contrast) -FeatureName "Contrast" -CmdletContext $PSCmdlet
 }
 
 Export-ModuleMember -Function Set-MonitorContrast
-
-
-
-
 
 function Find-MonitorVcpCodes {
     <#
@@ -845,6 +1026,10 @@ function Find-MonitorVcpCodes {
 
 Export-ModuleMember -Function Find-MonitorVcpCodes
 
+#endregion
+
+#region Argument Completers
+
 Register-ArgumentCompleter -CommandName Get-MonitorInfo, Get-MonitorInput, Get-MonitorPBP, Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP, Get-MonitorAudioVolume, Set-MonitorAudioVolume, Get-MonitorAudio, Enable-MonitorAudio, Disable-MonitorAudio, Get-MonitorBrightness, Set-MonitorBrightness, Get-MonitorContrast, Set-MonitorContrast, Find-MonitorVcpCodes -ParameterName MonitorName -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
@@ -881,3 +1066,5 @@ Register-ArgumentCompleter -CommandName Get-MonitorInfo, Get-MonitorInput, Get-M
         }
     }
 }
+
+#endregion

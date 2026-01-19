@@ -6,23 +6,22 @@ Describe 'Monitor module' {
     }
 
     Context 'Module export and structure' {
-        It 'imports and exposes functions' {
-            Get-Command Get-MonitorInfo | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorInput | Should -Not -BeNullOrEmpty
-            Get-Command Switch-MonitorInput | Should -Not -BeNullOrEmpty
-            Get-Command Enable-MonitorPBP | Should -Not -BeNullOrEmpty
-            Get-Command Disable-MonitorPBP | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorAudioVolume | Should -Not -BeNullOrEmpty
-            Get-Command Set-MonitorAudioVolume | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorAudio | Should -Not -BeNullOrEmpty
-            Get-Command Enable-MonitorAudio | Should -Not -BeNullOrEmpty
-            Get-Command Disable-MonitorAudio | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorBrightness | Should -Not -BeNullOrEmpty
-            Get-Command Set-MonitorBrightness | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorContrast | Should -Not -BeNullOrEmpty
-            Get-Command Set-MonitorContrast | Should -Not -BeNullOrEmpty
-            Get-Command Get-MonitorPBP | Should -Not -BeNullOrEmpty
-            Get-Command Find-MonitorVcpCodes | Should -Not -BeNullOrEmpty
+        BeforeAll {
+            $expectedFunctions = @(
+                'Get-MonitorInfo', 'Get-MonitorInput', 'Switch-MonitorInput',
+                'Enable-MonitorPBP', 'Disable-MonitorPBP', 'Get-MonitorPBP',
+                'Get-MonitorAudioVolume', 'Set-MonitorAudioVolume',
+                'Get-MonitorAudio', 'Enable-MonitorAudio', 'Disable-MonitorAudio',
+                'Get-MonitorBrightness', 'Set-MonitorBrightness',
+                'Get-MonitorContrast', 'Set-MonitorContrast',
+                'Find-MonitorVcpCodes'
+            )
+        }
+
+        It 'exports all expected functions' {
+            foreach ($fn in $expectedFunctions) {
+                Get-Command $fn -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+            }
         }
 
         It 'InputLeft parameter uses MonitorInput enum' {
@@ -114,21 +113,21 @@ Describe 'Monitor module' {
     }
 
     Context 'PBP Functions Logic' {
-        It 'Enable-MonitorPBP supports ShouldProcess (WhatIf)' {
-            { Enable-MonitorPBP -MonitorName 'dell' -WhatIf } | Should -Not -Throw
+        BeforeAll {
+            $pbpFunctions = @(
+                @{ Function = 'Enable-MonitorPBP'; HasParameters = $false }
+                @{ Function = 'Disable-MonitorPBP'; HasParameters = $false }
+            )
         }
 
-        It 'Disable-MonitorPBP supports ShouldProcess (WhatIf)' {
-            { Disable-MonitorPBP -MonitorName 'dell' -WhatIf } | Should -Not -Throw
+        It '<Function> supports ShouldProcess (WhatIf)' -TestCases $pbpFunctions {
+            param($Function)
+            { & $Function -MonitorName 'dell' -WhatIf } | Should -Not -Throw
         }
 
-        It 'Enable-MonitorPBP returns false cleanly if no monitor matches' {
-            $result = Enable-MonitorPBP -MonitorName 'GhostMonitorXYZ' -Verbose
-            $result | Should -BeFalse
-        }
-
-        It 'Disable-MonitorPBP returns false cleanly if no monitor matches' {
-            $result = Disable-MonitorPBP -MonitorName 'GhostMonitorXYZ' -Verbose
+        It '<Function> returns false cleanly if no monitor matches' -TestCases $pbpFunctions {
+            param($Function)
+            $result = & $Function -MonitorName 'GhostMonitorXYZ' -Verbose
             $result | Should -BeFalse
         }
     }
@@ -174,138 +173,76 @@ Describe 'Monitor module' {
         }
     }
 
-    Context "Disable-MonitorPBP" {
-        It "Should be exported" {
-            Get-Command Disable-MonitorPBP -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+    Context 'Audio/Brightness/Contrast Functions' {
+        BeforeAll {
+            $setFunctions = @(
+                @{ GetFunc = 'Get-MonitorAudioVolume'; SetFunc = 'Set-MonitorAudioVolume'; Param = 'Volume'; Min = 0; Max = 100 }
+                @{ GetFunc = 'Get-MonitorBrightness'; SetFunc = 'Set-MonitorBrightness'; Param = 'Brightness'; Min = 0; Max = 100 }
+                @{ GetFunc = 'Get-MonitorContrast'; SetFunc = 'Set-MonitorContrast'; Param = 'Contrast'; Min = 0; Max = 100 }
+            )
+            
+            $audioToggleFunctions = @(
+                @{ Function = 'Enable-MonitorAudio' }
+                @{ Function = 'Disable-MonitorAudio' }
+            )
         }
 
-        It "Should support WhatIf" {
-            { Disable-MonitorPBP -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
+        It '<GetFunc> is exported' -TestCases $setFunctions {
+            param($GetFunc)
+            Get-Command $GetFunc -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
 
-        It "Should handle non-existent monitor gracefully" {
-            Disable-MonitorPBP -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
-        }
-    }
-
-    Context "Get-MonitorAudioVolume" {
-        It "Should be exported" {
-             Get-Command Get-MonitorAudioVolume -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        It '<SetFunc> is exported' -TestCases $setFunctions {
+            param($SetFunc)
+            Get-Command $SetFunc -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
 
-        It "Should handle non-existent monitor gracefully" {
-            $result = Get-MonitorAudioVolume -MonitorName "DefinitelyNotAMonitor"
+        It '<GetFunc> handles non-existent monitor gracefully' -TestCases $setFunctions {
+            param($GetFunc)
+            $result = & $GetFunc -MonitorName "DefinitelyNotAMonitor"
             $result | Should -BeNullOrEmpty
         }
-    }
 
-    Context "Set-MonitorAudioVolume" {
-        It "Should be exported" {
-            Get-Command Set-MonitorAudioVolume -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        It '<SetFunc> supports WhatIf' -TestCases $setFunctions {
+            param($SetFunc, $Param)
+            $params = @{ MonitorName = "NonExistent"; $Param = 50; WhatIf = $true }
+            { & $SetFunc @params } | Should -Not -Throw
         }
 
-        It "Should support WhatIf" {
-            { Set-MonitorAudioVolume -MonitorName "NonExistent" -Volume 50 -WhatIf } | Should -Not -Throw
+        It '<SetFunc> validates <Param> range (<Min>-<Max>)' -TestCases $setFunctions {
+            param($SetFunc, $Param, $Min, $Max)
+            { & $SetFunc -MonitorName "Test" -$Param ($Max + 1) } | Should -Throw
+            { & $SetFunc -MonitorName "Test" -$Param ($Min - 1) } | Should -Throw
         }
 
-        It "Should validate Volume range (0-100)" {
-            { Set-MonitorAudioVolume -MonitorName "Test" -Volume 101 } | Should -Throw
-            { Set-MonitorAudioVolume -MonitorName "Test" -Volume -1 } | Should -Throw
+        It '<SetFunc> handles non-existent monitor gracefully' -TestCases $setFunctions {
+            param($SetFunc, $Param)
+            $params = @{ MonitorName = "DefinitelyNotAMonitor"; $Param = 50 }
+            & $SetFunc @params | Should -BeFalse
         }
 
-        It "Should handle non-existent monitor gracefully" {
-            Set-MonitorAudioVolume -MonitorName "DefinitelyNotAMonitor" -Volume 50 | Should -BeFalse
-        }
-    }
-
-    Context "Get-MonitorAudio" {
-        It "Should be exported" {
-             Get-Command Get-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        It 'Get-MonitorAudio is exported' {
+            Get-Command Get-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
 
-        It "Should handle non-existent monitor gracefully" {
+        It 'Get-MonitorAudio handles non-existent monitor gracefully' {
             $result = Get-MonitorAudio -MonitorName "DefinitelyNotAMonitor"
             $result | Should -BeNullOrEmpty
         }
-    }
 
-    Context "Enable-MonitorAudio" {
-        It "Should be exported" {
-            Get-Command Enable-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        It '<Function> is exported' -TestCases $audioToggleFunctions {
+            param($Function)
+            Get-Command $Function -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
 
-        It "Should support WhatIf" {
-            { Enable-MonitorAudio -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
+        It '<Function> supports WhatIf' -TestCases $audioToggleFunctions {
+            param($Function)
+            { & $Function -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
         }
 
-        It "Should handle non-existent monitor gracefully" {
-            Enable-MonitorAudio -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
-        }
-    }
-
-    Context "Disable-MonitorAudio" {
-        It "Should be exported" {
-            Get-Command Disable-MonitorAudio -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should support WhatIf" {
-            { Disable-MonitorAudio -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
-        }
-
-        It "Should handle non-existent monitor gracefully" {
-            Disable-MonitorAudio -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
-        }
-    }
-
-    Context "Get-MonitorBrightness" {
-        It "Should be exported" {
-             Get-Command Get-MonitorBrightness -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should handle non-existent monitor gracefully" {
-            $result = Get-MonitorBrightness -MonitorName "DefinitelyNotAMonitor"
-            $result | Should -BeNullOrEmpty
-        }
-    }
-
-    Context "Set-MonitorBrightness" {
-        It "Should be exported" {
-            Get-Command Set-MonitorBrightness -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should support WhatIf" {
-            { Set-MonitorBrightness -MonitorName "NonExistent" -Brightness 50 -WhatIf } | Should -Not -Throw
-        }
-
-        It "Should validate Brightness range (0-100)" {
-            { Set-MonitorBrightness -MonitorName "Test" -Brightness 101 } | Should -Throw
-            { Set-MonitorBrightness -MonitorName "Test" -Brightness -1 } | Should -Throw
-        }
-    }
-
-    Context "Get-MonitorContrast" {
-        It "Should be exported" {
-             Get-Command Get-MonitorContrast -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should handle non-existent monitor gracefully" {
-            $result = Get-MonitorContrast -MonitorName "DefinitelyNotAMonitor"
-            $result | Should -BeNullOrEmpty
-        }
-    }
-
-    Context "Set-MonitorContrast" {
-        It "Should be exported" {
-            Get-Command Set-MonitorContrast -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should support WhatIf" {
-            { Set-MonitorContrast -MonitorName "NonExistent" -Contrast 50 -WhatIf } | Should -Not -Throw
-        }
-
-        It "Should validate Contrast range (0-100)" {
-            { Set-MonitorContrast -MonitorName "Test" -Contrast 101 } | Should -Throw
-            { Set-MonitorContrast -MonitorName "Test" -Contrast -1 } | Should -Throw
+        It '<Function> handles non-existent monitor gracefully' -TestCases $audioToggleFunctions {
+            param($Function)
+            & $Function -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
         }
     }
 

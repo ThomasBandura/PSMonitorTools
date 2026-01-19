@@ -26,6 +26,47 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
         }
 
         $Script:sleepSeconds = 5
+        
+        # Helper function to reduce boilerplate in Get/Set tests
+        function Test-MonitorFeature {
+            param(
+                [Parameter(Mandatory)]
+                [scriptblock]$GetCurrent,
+                
+                [Parameter(Mandatory)]
+                [scriptblock]$SetValue,
+                
+                [Parameter(Mandatory)]
+                [string]$FeatureName,
+                
+                [Parameter(Mandatory)]
+                [string]$PropertyName,
+                
+                [int]$SleepSeconds = 2
+            )
+            
+            $initial = & $GetCurrent
+            if ($null -eq $initial -or $null -eq $initial.$PropertyName) {
+                Write-Warning "$FeatureName control not supported or failed to read."
+                Set-ItResult -Skipped
+                return
+            }
+            
+            $original = $initial.$PropertyName
+            Write-Host "Initial ${FeatureName}: $original" -ForegroundColor Gray
+            
+            $target = if ($original -ge 50) { $original - 10 } else { $original + 10 }
+            
+            try {
+                & $SetValue $target | Should -BeTrue
+                Start-Sleep -Seconds $SleepSeconds
+                (& $GetCurrent).$PropertyName | Should -Be $target
+            }
+            finally {
+                & $SetValue $original | Out-Null
+                Start-Sleep -Seconds $SleepSeconds
+            }
+        }
     }
 
     Context 'Basic Switching and PBP' {
@@ -37,7 +78,6 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
             
             Disable-MonitorPBP -MonitorName $TestMonitorName | Should -Be $true
-            Start-Sleep -Seconds 2
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.PBP | Should -BeFalse
@@ -47,7 +87,6 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft Hdmi1 | Should -Be $true
-            Start-Sleep -Seconds $Script:sleepSeconds
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.InputLeft | Should -Be 'Hdmi1'
@@ -61,7 +100,6 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft DisplayPort | Should -Be $true
-            Start-Sleep -Seconds $Script:sleepSeconds
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.InputLeft | Should -Be 'DisplayPort'
@@ -71,7 +109,6 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Enable-MonitorPBP -MonitorName $TestMonitorName | Should -Be $true
-            Start-Sleep -Seconds 10
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.PBP | Should -BeTrue
@@ -92,47 +129,19 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
             
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft $Left -InputRight $Right | Should -Be $true
-            Start-Sleep -Seconds $Script:sleepSeconds
 
-            # Retrying Read State (DDC/CI can be flaky)
-            $state = $null
-            $retry = 0
-            while ($retry -lt 3) {
-                try {
-                    $s = Get-MonitorInput -MonitorName $TestMonitorName -ErrorAction Stop
-                    # Valid state check: If PBP is active, we expect inputs to be populated (not null) unless Unknown
-                    # We tolerate Unknown, but shouldn't be null if we just set it.
-                    if ($s -and $s.PBP) {
-                        $state = $s
-                        break
-                    }
-                    # If PBP is false, maybe monitor is switching?
-                    if ($s -and -not $s.PBP) {
-                        Write-Warning "Monitor reports PBP=False. Retrying read..."
-                    }
-                } catch {}
-                Start-Sleep -Seconds 2
-                $retry++
-            }
-            if (-not $state) { $state = Get-MonitorInput -MonitorName $TestMonitorName } # Final attempt
+            $state = Get-MonitorInput -MonitorName $TestMonitorName
 
             # Log state for debugging
             $state | Out-String | Write-Host -ForegroundColor DarkGray
-
-            # We assert mostly that the command succeeded (Should -Be $true above).
-            # Monitor state reporting can be laggy. We warn if mismatch but don't hard fail unless completely wrong?
-            # No, let's be strict but rely on the retry above.
             
             # Exception: Some monitors auto-disable PBP for specific combinations (e.g. DP high freq).
-            # We accept PBP=False if the inputs were incompatible?
-            # For now, assert exact match.
-            
+            # We accept PBP=False if the inputs were incompatible, but log a warning
             if ($state.PBP) {
                 $state.InputLeft | Should -Be $Left
                 $state.InputRight | Should -Be $Right
             } else {
-                Write-Warning "PBP was disabled by the monitor for Left=$Left / Right=$Right (or read failed)"
-                # If PBP is disabled, we cannot check Inputs correctly as pairs.
+                Write-Warning "PBP was disabled by the monitor for Left=$Left / Right=$Right (incompatible combination or timing issue)"
             }
         }
     }
@@ -142,7 +151,6 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Disable-MonitorPBP -MonitorName $TestMonitorName | Should -Be $true
-            Start-Sleep -Seconds 5
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.PBP | Should -BeFalse
@@ -152,26 +160,25 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft DisplayPort | Should -Be $true
-            Start-Sleep -Seconds $Script:sleepSeconds
-
+            
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.InputLeft | Should -Be 'DisplayPort'
         }
     }
 
     Context 'Smart Ordering and Collision Avoidance' {
-        It 'Setup: Enables PBP and sets initial state (R=UsbC, L=DisplayPort)' {
+        It 'Setup: Enables PBP and sets initial state (Left=DisplayPort, Right=UsbC)' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Enable-MonitorPBP -MonitorName $TestMonitorName | Out-Null
-            Start-Sleep -Seconds 10 # Wait for settle
+            Start-Sleep -Seconds 10 # Wait for PBP to activate
 
             # Set distinct inputs to prepare for collision
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft DisplayPort | Out-Null
             Switch-MonitorInput -MonitorName $TestMonitorName -InputRight UsbC | Out-Null
-            Start-Sleep -Seconds 5
-
+            
             $state = Get-MonitorInput -MonitorName $TestMonitorName
+            $state | Should -Not -BeNullOrEmpty
             $state.InputRight | Should -Be 'UsbC'
         }
 
@@ -181,9 +188,8 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             # This triggers the "Smart Ordering" logic inside the module
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft UsbC -InputRight Hdmi1 | Should -Be $true
             
-            Start-Sleep -Seconds 5
-            
             $state = Get-MonitorInput -MonitorName $TestMonitorName
+            $state | Should -Not -BeNullOrEmpty
             $state.InputLeft | Should -Be 'UsbC'
             $state.InputRight | Should -Be 'Hdmi1'
         }
@@ -192,10 +198,8 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
 
             Disable-MonitorPBP -MonitorName $TestMonitorName | Should -Be $true
-            Start-Sleep -Seconds 20
             
             Switch-MonitorInput -MonitorName $TestMonitorName -InputLeft DisplayPort | Should -Be $true
-            Start-Sleep -Seconds 10
             
             $state = Get-MonitorInput -MonitorName $TestMonitorName
             $state.PBP | Should -BeFalse
@@ -243,78 +247,32 @@ Describe 'Monitor Hardware Integration' -Tag 'Hardware', 'Integration' {
 
         It 'Controls Audio Volume' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
-
-            $initial = Get-MonitorAudioVolume -MonitorName $TestMonitorName
-            if ($null -eq $initial -or $null -eq $initial.Volume) {
-                 Write-Warning "Volume control not supported or failed to read."
-                 Set-ItResult -Skipped
-            } else {
-                $origVol = $initial.Volume
-                Write-Host "Initial Volume: $origVol" -ForegroundColor Gray
-                
-                # Target: +10 or -10, bounded 0-100
-                $target = if ($origVol -ge 50) { $origVol - 10 } else { $origVol + 10 }
-
-                try {
-                    Set-MonitorAudioVolume -MonitorName $TestMonitorName -Volume $target | Should -BeTrue
-                    Start-Sleep -Seconds 2
-                    (Get-MonitorAudioVolume -MonitorName $TestMonitorName).Volume | Should -Be $target
-                }
-                finally {
-                    Set-MonitorAudioVolume -MonitorName $TestMonitorName -Volume $origVol | Out-Null
-                    Start-Sleep -Seconds 2
-                }
-            }
+            
+            Test-MonitorFeature `
+                -GetCurrent { Get-MonitorAudioVolume -MonitorName $TestMonitorName } `
+                -SetValue { param($v) Set-MonitorAudioVolume -MonitorName $TestMonitorName -Volume $v } `
+                -FeatureName 'Volume' `
+                -PropertyName 'Volume'
         }
 
         It 'Controls Contrast' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
-
-            $initial = Get-MonitorContrast -MonitorName $TestMonitorName
-            if ($null -eq $initial -or $null -eq $initial.Contrast) {
-                 Write-Warning "Contrast control not supported or failed to read."
-                 Set-ItResult -Skipped
-            } else {
-                $origContrast = $initial.Contrast
-                Write-Host "Initial Contrast: $origContrast" -ForegroundColor Gray
-
-                $target = if ($origContrast -ge 50) { $origContrast - 10 } else { $origContrast + 10 }
-
-                try {
-                    Set-MonitorContrast -MonitorName $TestMonitorName -Contrast $target | Should -BeTrue
-                    Start-Sleep -Seconds 2
-                    (Get-MonitorContrast -MonitorName $TestMonitorName).Contrast | Should -Be $target
-                }
-                finally {
-                    Set-MonitorContrast -MonitorName $TestMonitorName -Contrast $origContrast | Out-Null
-                    Start-Sleep -Seconds 2
-                }
-            }
+            
+            Test-MonitorFeature `
+                -GetCurrent { Get-MonitorContrast -MonitorName $TestMonitorName } `
+                -SetValue { param($v) Set-MonitorContrast -MonitorName $TestMonitorName -Contrast $v } `
+                -FeatureName 'Contrast' `
+                -PropertyName 'Contrast'
         }
 
         It 'Controls Brightness' {
             if ($Script:SkipHardwareTests) { Set-ItResult -Skipped }
-
-            $initial = Get-MonitorBrightness -MonitorName $TestMonitorName
-            if ($null -eq $initial -or $null -eq $initial.Brightness) {
-                 Write-Warning "Brightness control not supported or failed to read."
-                 Set-ItResult -Skipped
-            } else {
-                $origBrightness = $initial.Brightness
-                Write-Host "Initial Brightness: $origBrightness" -ForegroundColor Gray
-
-                $target = if ($origBrightness -ge 50) { $origBrightness - 10 } else { $origBrightness + 10 }
-
-                try {
-                    Set-MonitorBrightness -MonitorName $TestMonitorName -Brightness $target | Should -BeTrue
-                    Start-Sleep -Seconds 2
-                    (Get-MonitorBrightness -MonitorName $TestMonitorName).Brightness | Should -Be $target
-                }
-                finally {
-                    Set-MonitorBrightness -MonitorName $TestMonitorName -Brightness $origBrightness | Out-Null
-                    Start-Sleep -Seconds 2
-                }
-            }
+            
+            Test-MonitorFeature `
+                -GetCurrent { Get-MonitorBrightness -MonitorName $TestMonitorName } `
+                -SetValue { param($v) Set-MonitorBrightness -MonitorName $TestMonitorName -Brightness $v } `
+                -FeatureName 'Brightness' `
+                -PropertyName 'Brightness'
         }
     }
 }
