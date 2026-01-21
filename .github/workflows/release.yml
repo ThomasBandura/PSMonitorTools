@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    runs-on: windows-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    
+    steps:
+    - name: Get version from tag
+      id: get_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      shell: bash
+      
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+  build-powershell:
+    runs-on: windows-latest
+    needs: create-release
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build PowerShell Module
+      shell: pwsh
+      run: |
+        ./PowerShell/Build/build.ps1 -Version "${{ needs.create-release.outputs.version }}"
+        
+    - name: Upload PowerShell Module
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./releases/PowerShell/PSMonitorTools-v${{ needs.create-release.outputs.version }}.zip
+        asset_name: PSMonitorTools-v${{ needs.create-release.outputs.version }}.zip
+        asset_content_type: application/zip
+
+  build-csharp:
+    runs-on: windows-latest
+    needs: create-release
+    strategy:
+      matrix:
+        runtime: [win-x64, win-x86]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Publish ${{ matrix.runtime }}
+      run: |
+        dotnet publish CSharp/src/MonitorTools.CLI/MonitorTools.CLI.csproj `
+          --configuration Release `
+          --runtime ${{ matrix.runtime }} `
+          --self-contained true `
+          --output "releases/CSharp/${{ matrix.runtime }}" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:Version="${{ needs.create-release.outputs.version }}"
+          
+    - name: Upload C# CLI
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe
+        asset_name: MonitorTools-${{ matrix.runtime }}.exe
+        asset_content_type: application/octet-stream

@@ -1,0 +1,52 @@
+name: PowerShell CI
+
+on:
+  push:
+    branches: [ master, develop ]
+    paths:
+      - 'PowerShell/**'
+      - '.github/workflows/powershell-ci.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'PowerShell/**'
+
+jobs:
+  test:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Pester
+      shell: pwsh
+      run: |
+        Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+        
+    - name: Run Pester Tests
+      shell: pwsh
+      run: |
+        $config = New-PesterConfiguration
+        $config.Run.Path = "PowerShell/Tests"
+        $config.Output.Verbosity = "Detailed"
+        $config.CodeCoverage.Enabled = $true
+        $config.CodeCoverage.Path = "PowerShell/PSMonitorTools/*.ps1"
+        Invoke-Pester -Configuration $config
+        
+  build:
+    runs-on: windows-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build Module
+      shell: pwsh
+      run: |
+        ./PowerShell/Build/build.ps1 -Version "1.0.${{ github.run_number }}"
+        
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: PSMonitorTools-Module
+        path: releases/PowerShell/*.zip

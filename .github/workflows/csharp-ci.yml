@@ -1,0 +1,69 @@
+name: C# CI
+
+on:
+  push:
+    branches: [ master, develop ]
+    paths:
+      - 'CSharp/**'
+      - '.github/workflows/csharp-ci.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'CSharp/**'
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore CSharp/MonitorTools.sln
+      
+    - name: Build
+      run: dotnet build CSharp/MonitorTools.sln --configuration Release --no-restore
+      
+    - name: Test
+      run: dotnet test CSharp/MonitorTools.sln --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+      
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        directory: ./CSharp
+        
+  publish:
+    runs-on: windows-latest
+    needs: build-and-test
+    strategy:
+      matrix:
+        runtime: [win-x64, win-x86]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Publish ${{ matrix.runtime }}
+      run: |
+        dotnet publish CSharp/src/MonitorTools.CLI/MonitorTools.CLI.csproj `
+          --configuration Release `
+          --runtime ${{ matrix.runtime }} `
+          --self-contained true `
+          --output "releases/CSharp/${{ matrix.runtime }}" `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true
+        
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: MonitorTools-CLI-${{ matrix.runtime }}
+        path: releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe

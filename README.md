@@ -1,46 +1,96 @@
 # PSMonitorTools
 
-PowerShell module to retrieve physical monitor information (Model, Serial, Firmware) and control input sources (HDMI, DP, USB-C) via DDC/CI / VCP codes.
+Monitor information and brightness control for Windows - available as both PowerShell module and C# executable.
+
+[![PowerShell CI](https://github.com/ThomasBandura/PSMonitorTools/workflows/PowerShell%20CI/badge.svg)](https://github.com/ThomasBandura/PSMonitorTools/actions)
+[![C# CI](https://github.com/ThomasBandura/PSMonitorTools/workflows/C%23%20CI/badge.svg)](https://github.com/ThomasBandura/PSMonitorTools/actions)
+[![License](https://img.shields.io/github/license/ThomasBandura/PSMonitorTools)](LICENSE)
+
+## 📦 Available Implementations
+
+### 🔷 PowerShell Module
+PowerShell module for scripting and automation.
+- 📖 [PowerShell Documentation](./docs/PowerShell/)
+- 💾 [Installation Guide](./docs/PowerShell/Installation.md)
+- 📝 [Examples](./docs/Examples/PowerShell-Examples.md)
+
+### 🔶 C# Executable
+Standalone command-line tool and library.
+- 📖 [C# CLI Documentation](./docs/CSharp/)
+- 💾 [Installation Guide](./docs/CSharp/Installation.md)
+- 📝 [Examples](./docs/Examples/CSharp-Examples.md)
 
 ## Project Goals
 
-The primary goal of this project is to provide a reliable programmatic interface for controlling physical monitor settings on Windows. By exposing DDC/CI capabilities through friendly PowerShell cmdlets, it facilitates automation scenarios such as:
-- **Automation:** Switching monitor inputs based on work context (e.g., software KVM switching logic).
-- **Comfort:** Adjusting brightness and contrast programmatically (e.g., based on time of day).
-- **Efficiency:** Managing Picture-by-Picture (PBP) modes without navigating cumbersome OSD (On-Screen Display) menus.
-- **Inventory:** Retrieving hardware details (Serial Numbers, Firmware) for asset management.
+The primary goal of this project is to provide a reliable programmatic interface for controlling physical monitor settings on Windows. By exposing DDC/CI capabilities through friendly APIs, it facilitates automation scenarios such as:
+- **Automation:** Switching monitor inputs based on work context (e.g., software KVM switching logic)
+- **Comfort:** Adjusting brightness and contrast programmatically (e.g., based on time of day)
+- **Efficiency:** Managing Picture-by-Picture (PBP) modes without navigating cumbersome OSD (On-Screen Display) menus
+- **Inventory:** Retrieving hardware details (Serial Numbers, Firmware) for asset management
 
 ## Features
 
-- **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date).
-- **Get-MonitorInput**: Retrieves current input sources and PBP status for a specific monitor.
-- **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort).
-- **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors.
-- **Get-MonitorAudioVolume**: Retrieves current audio volume.
-- **Set-MonitorAudioVolume**: Controls the volume of the monitor speakers.
-- **Get-MonitorAudio**: Retrieves current audio mute state (Enabled/Disabled).
-- **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or Unmutes the monitor audio.
-- **Get-MonitorBrightness**: Retrieves current brightness (luminance) level (0-100).
-- **Set-MonitorBrightness**: Sets the brightness level.
-- **Get-MonitorContrast**: Retrieves current contrast level (0-100).
-- **Set-MonitorContrast**: Sets the contrast level.
-- **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes by comparing monitor state before and after a manual change.
-- **Tab Completion**: Supports argument completion for monitor names.
-- **Robustness (v0.6+)**: Includes "Smart Ordering" to prevent input collisions in PBP/Picture-by-Picture modes and active waiting for monitor readiness to ensure reliable command execution.
-- **Dual-API Strategy**: Uses both Low-Level Monitor Configuration API and WMI fallback.
+### PowerShell Module
+- **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date)
+- **Get-MonitorInput**: Retrieves current input sources and PBP status for a specific monitor
+- **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort)
+- **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors
+- **Get-MonitorAudioVolume / Set-MonitorAudioVolume**: Controls monitor speaker volume
+- **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or unmutes monitor audio
+- **Get-MonitorBrightness / Set-MonitorBrightness**: Controls brightness (luminance) level (0-100)
+- **Get-MonitorContrast / Set-MonitorContrast**: Controls contrast level (0-100)
+- **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes
+- **Tab Completion**: Supports argument completion for monitor names
+- **Dual-API Strategy**: Uses both Low-Level Monitor Configuration API and WMI fallback
+
+### C# Library & CLI
+- **MonitorService**: Core library for monitor information and brightness control
+- **CLI Commands**:
+  - `get-info`: Get information about all connected monitors
+  - `get-brightness`: Get brightness level of a monitor
+  - `set-brightness`: Set brightness level of a monitor
+- **Cross-platform API**: Reusable `MonitorTools.Core` library for integration into other C# projects
+
+## Quick Start
+
+### PowerShell
+```powershell
+# Install from PowerShell Gallery
+Install-Module PSMonitorTools
+
+# Or import locally
+Import-Module ./PowerShell/PSMonitorTools/PSMonitorTools.psd1
+
+# Get monitor info
+Get-MonitorInfo
+
+# Set brightness
+Set-MonitorBrightness -Brightness 75
+```
+
+### C# CLI
+```cmd
+# Download from Releases or build
+dotnet build CSharp/MonitorTools.sln
+
+# Get monitor info
+MonitorTools.exe get-info
+
+# Set brightness
+MonitorTools.exe set-brightness 75
+```
 
 ## Installation
 
-1. Clone or download this repository.
-2. Import the module directly:
+See detailed installation guides:
+- **PowerShell**: [Installation Guide](./docs/PowerShell/Installation.md)
+- **C# CLI**: [Installation Guide](./docs/CSharp/Installation.md)
 
-```powershell
-Import-Module ./PSMonitorTools/PSMonitorTools.psd1
-```
+## Usage Examples
 
-## Usage
+### PowerShell
 
-### Get Monitor Information
+#### Get Monitor Information
 
 ```powershell
 # Get all monitors
@@ -56,6 +106,55 @@ Index Name                          Model   SerialNumber Manufacturer Firmware W
 ----- ----                          -----   ------------ ------------ -------- ----------------- -----------------
     0 Dell U4924DW(DisplayPort 1.4) U4924DW xxxxxxx      DEL          105                     26              2023
 ```
+
+#### Brightness Control
+
+```powershell
+# Get brightness
+Get-MonitorBrightness
+
+# Set brightness
+Set-MonitorBrightness -Brightness 50
+```
+
+### C# CLI
+
+#### Get Monitor Information
+
+```cmd
+MonitorTools.exe get-info
+```
+
+**Output:**
+```text
+Found 2 monitor(s):
+
+Monitor 0:
+  Device:      \\.\DISPLAY1
+  Resolution:  3840x2160
+  Primary:     Yes
+  Brightness:  75%
+
+Monitor 1:
+  Device:      \\.\DISPLAY2
+  Resolution:  1920x1080
+  Primary:     No
+```
+
+#### Brightness Control
+
+```cmd
+# Get brightness
+MonitorTools.exe get-brightness
+
+# Set brightness
+MonitorTools.exe set-brightness 50
+
+# Set brightness for specific monitor
+MonitorTools.exe set-brightness 75 --monitor 1
+```
+
+## Advanced PowerShell Features
 
 ### Get Input State
 
