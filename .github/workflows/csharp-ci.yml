@@ -63,7 +63,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
         
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: MonitorTools-CLI-${{ matrix.runtime }}
         path: releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe
