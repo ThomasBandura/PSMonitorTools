@@ -35,7 +35,10 @@ Copy-Item "$ModulePath\*.ps*1" -Destination $VersionedOutputPath -Recurse
 $ManifestPath = Join-Path $VersionedOutputPath "PSMonitorTools.psd1"
 if (Test-Path $ManifestPath) {
     Write-Host "Updating module manifest version..." -ForegroundColor Yellow
-    Update-ModuleManifest -Path $ManifestPath -ModuleVersion $Version
+    # Read manifest content and update version manually to avoid folder name conflict
+    $manifestContent = Get-Content $ManifestPath -Raw
+    $manifestContent = $manifestContent -replace "ModuleVersion\s*=\s*'[\d\.]+'", "ModuleVersion = '$Version'"
+    Set-Content -Path $ManifestPath -Value $manifestContent -NoNewline
 }
 
 # Create zip archive
