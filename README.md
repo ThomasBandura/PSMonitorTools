@@ -1,271 +1,422 @@
 # PSMonitorTools
 
-Monitor information and brightness control for Windows - available as both PowerShell module and C# executable.
+Windows-Monitorsteuerung über DDC/CI - verfügbar als PowerShell-Modul und C# CLI-Tool.
 
 [![PowerShell CI](https://github.com/ThomasBandura/PSMonitorTools/workflows/PowerShell%20CI/badge.svg)](https://github.com/ThomasBandura/PSMonitorTools/actions)
 [![C# CI](https://github.com/ThomasBandura/PSMonitorTools/workflows/C%23%20CI/badge.svg)](https://github.com/ThomasBandura/PSMonitorTools/actions)
 [![License](https://img.shields.io/github/license/ThomasBandura/PSMonitorTools)](LICENSE)
 
-## 📦 Available Implementations
+## 📦 Verfügbare Implementierungen
 
 ### 🔷 PowerShell Module
-PowerShell module for scripting and automation.
-- 📖 [PowerShell Documentation](./docs/PowerShell/)
-- 💾 [Installation Guide](./docs/PowerShell/Installation.md)
-- 📝 [Examples](./docs/Examples/PowerShell-Examples.md)
+PowerShell-Modul für Scripting und Automation.
+- 📖 [PowerShell Dokumentation](./docs/PowerShell/Get-MonitorInfo.md)
+- 💾 [Installation](./docs/PowerShell/Installation.md)
+- 📝 [Beispiele](./docs/Examples/PowerShell-Examples.md)
 
-### 🔶 C# Executable
-Standalone command-line tool and library.
-- 📖 [C# CLI Documentation](./docs/CSharp/)
-- 💾 [Installation Guide](./docs/CSharp/Installation.md)
-- 📝 [Examples](./docs/Examples/CSharp-Examples.md)
+### 🔶 C# CLI Tool
+Standalone Kommandozeilentool und Library.
+- 📖 [C# CLI Dokumentation](./docs/CSharp/CLI-Usage.md)
+- 💾 [Installation](./docs/CSharp/Installation.md)
+- 📝 [Beispiele](./docs/Examples/CSharp-Examples.md)
 
-## Project Goals
+## Projektziele
 
-The primary goal of this project is to provide a reliable programmatic interface for controlling physical monitor settings on Windows. By exposing DDC/CI capabilities through friendly APIs, it facilitates automation scenarios such as:
-- **Automation:** Switching monitor inputs based on work context (e.g., software KVM switching logic)
-- **Comfort:** Adjusting brightness and contrast programmatically (e.g., based on time of day)
-- **Efficiency:** Managing Picture-by-Picture (PBP) modes without navigating cumbersome OSD (On-Screen Display) menus
-- **Inventory:** Retrieving hardware details (Serial Numbers, Firmware) for asset management
+Dieses Projekt bietet eine zuverlässige programmatische Schnittstelle zur Steuerung physischer Monitor-Einstellungen unter Windows. Durch die Bereitstellung von DDC/CI-Funktionen über benutzerfreundliche APIs werden folgende Automatisierungsszenarien ermöglicht:
+
+- **Automatisierung:** Eingabequellen-Wechsel basierend auf Arbeitskontext (z.B. Software-KVM-Logik)
+- **Komfort:** Programmatische Anpassung von Helligkeit und Kontrast (z.B. nach Tageszeit)
+- **Effizienz:** Verwaltung von Picture-by-Picture (PBP) Modi ohne umständliche OSD-Menüs
+- **Inventarisierung:** Abrufen von Hardware-Details (Seriennummern, Firmware) für Asset-Management
 
 ## Features
 
 ### PowerShell Module
-- **Get-MonitorInfo**: Retrieves detailed information about connected monitors (Model, Serial Number, Firmware Version, Manufacturing Date)
-- **Get-MonitorInput**: Retrieves current input sources and PBP status for a specific monitor
-- **Switch-MonitorInput**: Switches the input source of a specific monitor (e.g., from HDMI1 to DisplayPort)
-- **Enable-MonitorPBP / Disable-MonitorPBP**: Controls Picture-by-Picture (PBP) mode on supported monitors
-- **Get-MonitorAudioVolume / Set-MonitorAudioVolume**: Controls monitor speaker volume
-- **Enable-MonitorAudio / Disable-MonitorAudio**: Mutes or unmutes monitor audio
-- **Get-MonitorBrightness / Set-MonitorBrightness**: Controls brightness (luminance) level (0-100)
-- **Get-MonitorContrast / Set-MonitorContrast**: Controls contrast level (0-100)
-- **Find-MonitorVcpCodes**: Interactive tool to discover hidden VCP codes
-- **Tab Completion**: Supports argument completion for monitor names
-- **Dual-API Strategy**: Uses both Low-Level Monitor Configuration API and WMI fallback
+
+#### Monitor-Informationen
+- **Get-MonitorInfo**: Ruft detaillierte Informationen ab (Modell, Seriennummer, Firmware, Herstellungsdatum)
+
+#### Eingabequellen
+- **Get-MonitorInput**: Zeigt aktuelle Eingabequellen und PBP-Status
+- **Switch-MonitorInput**: Wechselt Eingabequellen mit intelligenter Kollisionserkennung für PBP-Modi
+
+#### PBP (Picture-by-Picture)
+- **Get-MonitorPBP**: Zeigt PBP-Status
+- **Enable-MonitorPBP / Disable-MonitorPBP**: Aktiviert/Deaktiviert PBP-Modus
+
+#### Audio
+- **Get-MonitorAudioVolume / Set-MonitorAudioVolume**: Steuert Lautstärke der Monitor-Lautsprecher
+- **Get-MonitorAudio**: Zeigt Stummschaltungs-Status
+- **Enable-MonitorAudio / Disable-MonitorAudio**: Hebt Stummschaltung auf/Schaltet stumm
+
+#### Bildeinstellungen
+- **Get-MonitorBrightness / Set-MonitorBrightness**: Steuert Helligkeit (0-100)
+- **Get-MonitorContrast / Set-MonitorContrast**: Steuert Kontrast (0-100)
+
+#### Erweiterte Funktionen
+- **Find-MonitorVcpCodes**: Interaktives Tool zum Entdecken versteckter VCP-Codes
+- **Tab-Vervollständigung**: Unterstützt Argument-Completion für Monitor-Namen
+- **WhatIf/Confirm**: Alle Set-Cmdlets unterstützen `-WhatIf` und `-Confirm`
 
 ### C# Library & CLI
-- **MonitorService**: Core library for monitor information and brightness control
-- **CLI Commands**:
-  - `get-info`: Get information about all connected monitors
-  - `get-brightness`: Get brightness level of a monitor
-  - `set-brightness`: Set brightness level of a monitor
-- **Cross-platform API**: Reusable `MonitorTools.Core` library for integration into other C# projects
 
-## Quick Start
+#### MonitorService (Core Library)
+- Ruft Monitor-Informationen ab (Modell, Hersteller, Seriennummer, Firmware)
+- Steuert Helligkeit, Kontrast, Lautstärke
+- Verwaltet Eingabequellen und PBP-Modus
+- Direkter VCP-Feature-Zugriff für erweiterte Steuerung
+- Wiederverwendbare `MonitorTools.Core` Library für Integration in eigene C#-Projekte
+
+#### CLI-Befehle
+- `get-info`: Monitor-Informationen anzeigen
+- `get-brightness / set-brightness`: Helligkeit abrufen/setzen
+- `get-contrast / set-contrast`: Kontrast abrufen/setzen
+- `get-volume / set-volume`: Lautstärke abrufen/setzen
+- `audio [status|mute|unmute]`: Audio-Steuerung
+- `input [get|set]`: Eingabequellen-Verwaltung
+- `pbp [status|enable|disable|set-right]`: PBP-Steuerung
+- `vcp [get|set]`: Low-Level VCP-Feature-Zugriff
+
+## Schnellstart
 
 ### PowerShell
-```powershell
-# Install from PowerShell Gallery
-Install-Module PSMonitorTools
 
-# Or import locally
+```powershell
+# Modul importieren
 Import-Module ./PowerShell/PSMonitorTools/PSMonitorTools.psd1
 
-# Get monitor info
+# Monitor-Informationen abrufen
 Get-MonitorInfo
 
-# Set brightness
-Set-MonitorBrightness -Brightness 75
+# Helligkeit setzen
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 75
+
+# Eingabequelle wechseln
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft DisplayPort
+
+# PBP aktivieren und beide Eingänge setzen
+Enable-MonitorPBP -MonitorName 'Dell'
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft Hdmi1 -InputRight UsbC
 ```
 
 ### C# CLI
+
 ```cmd
-# Download from Releases or build
+# Bauen
 dotnet build CSharp/MonitorTools.sln
 
-# Get monitor info
-MonitorTools.exe get-info
+# Monitor-Informationen
+MonitorTools get-info
 
-# Set brightness
-MonitorTools.exe set-brightness 75
+# Helligkeit setzen
+MonitorTools set-brightness 75
+
+# Eingabequelle wechseln
+MonitorTools input set DisplayPort
+
+# PBP aktivieren
+MonitorTools pbp enable
+MonitorTools pbp set-right UsbC
 ```
 
 ## Installation
 
-See detailed installation guides:
-- **PowerShell**: [Installation Guide](./docs/PowerShell/Installation.md)
-- **C# CLI**: [Installation Guide](./docs/CSharp/Installation.md)
+Detaillierte Installationsanleitungen:
+- **PowerShell**: [Installationsanleitung](./docs/PowerShell/Installation.md)
+- **C# CLI**: [Installationsanleitung](./docs/CSharp/Installation.md)
 
-## Usage Examples
+## Verwendungsbeispiele
 
 ### PowerShell
 
-#### Get Monitor Information
+#### Monitor-Informationen abrufen
 
 ```powershell
-# Get all monitors
+# Alle Monitore anzeigen
 Get-MonitorInfo
 
-# Get specific monitor
+# Spezifischen Monitor anzeigen
 Get-MonitorInfo -MonitorName 'Dell'
 ```
 
-**Output:**
+**Ausgabe:**
 ```text
-Index Name                          Model   SerialNumber Manufacturer Firmware WeekOfManufacture YearOfManufacture
------ ----                          -----   ------------ ------------ -------- ----------------- -----------------
-    0 Dell U4924DW(DisplayPort 1.4) U4924DW xxxxxxx      DEL          105                     26              2023
+Index Name                Model   SerialNumber Manufacturer Firmware WeekOfManufacture YearOfManufacture
+----- ----                -----   ------------ ------------ -------- ----------------- -----------------
+    0 Dell U2723DE        U2723DE ABC123       DEL          105                     26              2023
 ```
 
-#### Brightness Control
+#### Eingabequelle abrufen und wechseln
 
 ```powershell
-# Get brightness
-Get-MonitorBrightness
+# Aktuelle Eingabe(n) anzeigen
+Get-MonitorInput -MonitorName 'Dell'
+```
 
-# Set brightness
-Set-MonitorBrightness -Brightness 50
+**Ausgabe (PBP aktiv):**
+```text
+Name         Model    PBP   InputLeft InputRight
+----         -----    ---   --------- ----------
+Dell U2723DE U2723DE  True  Hdmi1     UsbC
+```
+
+```powershell
+# Auf DisplayPort wechseln
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft DisplayPort
+
+# PBP: Links auf HDMI1, rechts auf USB-C
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft Hdmi1 -InputRight UsbC
+```
+
+**Unterstützte Eingabequellen:**
+- `Hdmi1` (0x11)
+- `Hdmi2` (0x12)
+- `DisplayPort` (0x0F)
+- `UsbC` (0x1B)
+
+#### PBP (Picture-by-Picture) steuern
+
+```powershell
+# PBP-Status abfragen
+Get-MonitorPBP -MonitorName 'Dell'
+
+# PBP aktivieren
+Enable-MonitorPBP -MonitorName 'Dell'
+
+# PBP deaktivieren
+Disable-MonitorPBP -MonitorName 'Dell'
+```
+
+#### Audio steuern
+
+```powershell
+# Lautstärke abrufen
+Get-MonitorAudioVolume -MonitorName 'Dell'
+
+# Lautstärke auf 50% setzen
+Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
+
+# Stummschaltungs-Status
+Get-MonitorAudio -MonitorName 'Dell'
+
+# Stummschaltung aufheben
+Enable-MonitorAudio -MonitorName 'Dell'
+
+# Stummschalten
+Disable-MonitorAudio -MonitorName 'Dell'
+```
+
+#### Helligkeit & Kontrast
+
+```powershell
+# Helligkeit abrufen
+Get-MonitorBrightness -MonitorName 'Dell'
+
+# Helligkeit auf 75% setzen
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 75
+
+# Kontrast abrufen
+Get-MonitorContrast -MonitorName 'Dell'
+
+# Kontrast auf 60% setzen
+Set-MonitorContrast -MonitorName 'Dell' -Contrast 60
+```
+
+#### VCP-Codes entdecken
+
+Interaktives Tool zum Finden versteckter VCP-Codes:
+
+```powershell
+# Standard-Scan (0x60 + 0xE0-0xFF)
+Find-MonitorVcpCodes -MonitorName 'Dell'
+
+# Vollständiger Scan (0x00-0xFF)
+Find-MonitorVcpCodes -MonitorName 'Dell' -FullScan
 ```
 
 ### C# CLI
 
-#### Get Monitor Information
+#### Monitor-Informationen
 
 ```cmd
-MonitorTools.exe get-info
-```
-
-**Output:**
-```text
+> MonitorTools get-info
 Found 2 monitor(s):
 
 Monitor 0:
-  Device:      \\.\DISPLAY1
-  Resolution:  3840x2160
-  Primary:     Yes
-  Brightness:  75%
+  Name:              Dell U2723DE
+  Model:             U2723DE
+  SerialNumber:      ABC123
+  Manufacturer:      DEL
 
 Monitor 1:
-  Device:      \\.\DISPLAY2
-  Resolution:  1920x1080
-  Primary:     No
+  Name:              ASUS ProArt
+  Model:             PA279CV
+  Manufacturer:      ACI
 ```
 
-#### Brightness Control
+#### Helligkeit
 
 ```cmd
-# Get brightness
-MonitorTools.exe get-brightness
+# Helligkeit abrufen
+> MonitorTools get-brightness
+Monitor 0 brightness: 75
 
-# Set brightness
-MonitorTools.exe set-brightness 50
+# Helligkeit setzen
+> MonitorTools set-brightness 50
+Monitor 0 brightness set to 50
 
-# Set brightness for specific monitor
-MonitorTools.exe set-brightness 75 --monitor 1
+# Für spezifischen Monitor
+> MonitorTools set-brightness 75 --monitor 1
 ```
 
-## Advanced PowerShell Features
+#### Eingabequelle
 
-### Get Input State
+```cmd
+# Aktuelle Eingabe anzeigen
+> MonitorTools input get
+Monitor 0 input: Hdmi1
 
-Check the current active input(s) and Picture-by-Picture (PBP) status.
+# Auf DisplayPort wechseln
+> MonitorTools input set DisplayPort
+Monitor 0 input switched to DisplayPort
+```
+
+#### PBP
+
+```cmd
+# Status
+> MonitorTools pbp status
+PBP Mode: Disabled
+
+# Aktivieren
+> MonitorTools pbp enable
+PBP mode enabled
+
+# Rechte Eingabe setzen
+> MonitorTools pbp set-right UsbC
+PBP right input set to UsbC
+```
+
+#### VCP-Feature-Zugriff
+
+```cmd
+# VCP-Code lesen
+> MonitorTools vcp get 0x10
+Monitor 0 VCP 0x10:
+  Current: 75
+  Maximum: 100
+
+# VCP-Code setzen
+> MonitorTools vcp set 0x10 50
+Monitor 0 VCP 0x10 set to 50
+```
+
+## Praktische Szenarien
+
+### Software-KVM-Switching
 
 ```powershell
-Get-MonitorInput -MonitorName 'Dell'
+# Funktion für schnellen Wechsel zwischen PCs
+function Switch-ToWorkPC {
+    Switch-MonitorInput -MonitorName 'Dell' -InputLeft UsbC
+}
+
+function Switch-ToGamingPC {
+    Switch-MonitorInput -MonitorName 'Dell' -InputLeft Hdmi1
+}
 ```
 
-**Output:**
-```text
-Name                              Model   PBP InputLeft   InputRight
-----                              -----   --- ---------   ----------
-Dell U4924DW(DisplayPort PBP/PIP) U4924DW True Hdmi1      DisplayPort
-```
-
-### Switch Input Source
-
-Switch the input of a specific monitor. You can control the Primary Input (Left) and the Secondary Input (Right) for PBP modes.
+### Dual-PC-Setup mit PBP
 
 ```powershell
-# Switch 'Dell' monitor Primary Input to HDMI 1
-Switch-MonitorInput -MonitorName 'Dell' -InputLeft Hdmi1
-
-# Switch Primary to HDMI 1 and Secondary to DisplayPort (PBP setup)
-Switch-MonitorInput -MonitorName 'U4924DW' -InputLeft Hdmi1 -InputRight DisplayPort
-
-# Legacy support: -InputSource is an alias for -InputLeft
-Switch-MonitorInput -MonitorName 'Dell' -InputSource Hdmi1
-```
-
-**Supported Inputs:**
-- `Hdmi1`
-- `Hdmi2`
-- `DisplayPort`
-- `UsbC`
-
-### Control Picture-by-Picture (PBP)
-
-Enable or disable PBP mode on supported monitors (uses VCP code `0xE9`).
-
-```powershell
-# Enable PBP on a Dell monitor
+# Beide PCs gleichzeitig anzeigen
 Enable-MonitorPBP -MonitorName 'Dell'
-
-# Disable PBP
-Disable-MonitorPBP -MonitorName 'Dell'
+Switch-MonitorInput -MonitorName 'Dell' -InputLeft UsbC -InputRight Hdmi2
 ```
 
-### Control Audio
-
-Control the volume and mute state of the monitor speakers.
+### Helligkeit nach Tageszeit
 
 ```powershell
-# Get current volume
-Get-MonitorAudioVolume -MonitorName 'Dell'
+$hour = (Get-Date).Hour
 
-# Set volume to 50%
-Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
-
-# Get current audio status (Enabled=Unmuted, Disabled=Muted)
-Get-MonitorAudio -MonitorName 'Dell'
-
-# Unmute Audio
-Enable-MonitorAudio -MonitorName 'Dell'
-
-# Mute Audio
-Disable-MonitorAudio -MonitorName 'Dell'
+if ($hour -ge 6 -and $hour -lt 9) {
+    Set-MonitorBrightness -MonitorName 'Dell' -Brightness 40
+} elseif ($hour -ge 9 -and $hour -lt 18) {
+    Set-MonitorBrightness -MonitorName 'Dell' -Brightness 80
+} else {
+    Set-MonitorBrightness -MonitorName 'Dell' -Brightness 25
+}
 ```
 
-### Control Brightness & Contrast
+## Systemvoraussetzungen
 
-Adjust the screen brightness (luminance) and contrast.
+- **Betriebssystem:** Windows 10/11 oder Windows Server 2016+
+- **PowerShell:** 5.1 oder PowerShell 7+ (pwsh)
+- **C# CLI:** .NET 6.0 oder höher
+- **Monitor:** DDC/CI-Unterstützung erforderlich (im Monitor-OSD aktivieren)
 
-```powershell
-# Get current brightness
-Get-MonitorBrightness -MonitorName 'Dell'
+## Projektstruktur
 
-# Set brightness to 75%
-Set-MonitorBrightness -MonitorName 'Dell' -Brightness 75
+```
+PowerShell/
+├── PSMonitorTools/          # PowerShell-Modul
+│   ├── PSMonitorTools.psd1  # Manifest
+│   ├── PSMonitorTools.psm1  # Hauptmodul
+│   └── PSMonitorToolsHelper.ps1  # C# Helper-Klassen
+├── Tests/                   # Pester-Tests
+└── Get-MonitorInfo.ps1      # Legacy-Wrapper
 
-# Get current contrast
-Get-MonitorContrast -MonitorName 'Dell'
+CSharp/
+├── src/
+│   ├── MonitorTools.Core/   # Kernbibliothek
+│   └── MonitorTools.CLI/    # CLI-Tool
+└── tests/                   # Unit & Integration Tests
 
-# Set contrast to 60%
-Set-MonitorContrast -MonitorName 'Dell' -Contrast 60
+docs/
+├── PowerShell/              # PowerShell-Dokumentation
+├── CSharp/                  # C#-Dokumentation
+└── Examples/                # Beispiele
 ```
 
-### Discover VCP Codes
+## Technische Details
 
-Interactively find hidden VCP codes by scanning the monitor, asking you to change a setting via OSD, and scanning again to find differences.
+### DDC/CI & VCP-Codes
 
-```powershell
-# Standard Scan (Common Consumer Codes)
-Find-MonitorVcpCodes -MonitorName 'Dell U4924DW'
+Dieses Projekt nutzt DDC/CI (Display Data Channel Command Interface) für die Monitor-Kommunikation. Die wichtigsten verwendeten VCP-Codes:
 
-# Full Scan (0x00 - 0xFF) - Useful for finding proprietary codes (like KVM)
-Find-MonitorVcpCodes -MonitorName 'Dell U4924DW' -FullScan
-```
+| Code | Beschreibung          | Verwendung |
+|------|-----------------------|------------|
+| 0x10 | Brightness            | Helligkeit |
+| 0x12 | Contrast              | Kontrast   |
+| 0x60 | Input Source (Left)   | Primäre Eingabe |
+| 0x62 | Audio Volume          | Lautstärke |
+| 0x8D | Audio Mute            | Stummschaltung |
+| 0xC9 | Firmware Version      | Firmware   |
+| 0xE8 | PBP Right Input       | Rechte PBP-Eingabe |
+| 0xE9 | PBP/PIP Mode          | PBP-Modus  |
 
-## Requirements
+### APIs
 
-- Windows OS
-- PowerShell 5.1 or PowerShell 7+ (pwsh)
-- Monitors supporting DDC/CI (CI/DDC must be enabled in monitor settings)
+- **PowerShell:** Windows Low-Level Monitor Configuration Functions + WMI (root\wmi\WmiMonitorID)
+- **C# Core:** P/Invoke zu dxva2.dll, user32.dll, gdi32.dll
+- **CLI:** System.CommandLine für moderne CLI-Erfahrung
 
-> **Note:** This module was tested exclusively with a **Dell U4924DW**.
+## Beitragen
 
-## Project Structure
+Contributions sind willkommen! Bitte beachten Sie:
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
-- `PSMonitorTools/`: The core module.
-- `Tests/`: Pester tests.
-- `Get-MonitorInfo.ps1`: Wrapper script for quick execution.
+## Lizenz
+
+Dieses Projekt ist unter der [MIT License](LICENSE) lizenziert.
+
+## Danksagungen
+
+- DDC/CI-Standard: [VESA MCCS](https://vesa.org/)
+- Getestet mit: Dell U2723DE, Dell U4924DW
+
+## Changelog
+
+Siehe [CHANGELOG.md](CHANGELOG.md) für Details zu Änderungen in jeder Version.
 

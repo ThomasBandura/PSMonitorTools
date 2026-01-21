@@ -90,16 +90,17 @@ public static class PbpModeValue
 
 /// <summary>
 /// Audio mute states
+/// VCP 0x8D: 0x00 = Muted, 0x01 = Unmuted
 /// </summary>
 public enum AudioMuteState
 {
     /// <summary>
-    /// Audio is unmuted
-    /// </summary>
-    Unmuted = 0x01,
-
-    /// <summary>
     /// Audio is muted
     /// </summary>
-    Muted = 0x02
+    Muted = 0x00,
+
+    /// <summary>
+    /// Audio is unmuted
+    /// </summary>
+    Unmuted = 0x01
 }

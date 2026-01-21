@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to get information about all monitors
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class GetInfoCommand
 {
     public static Command Create()
@@ -36,22 +37,30 @@ public static class GetInfoCommand
                 foreach (var monitor in monitors)
                 {
                     Console.WriteLine($"Monitor {monitor.Index}:");
-                    Console.WriteLine($"  Device:      {monitor.DeviceName}");
+                    
+                    if (!string.IsNullOrEmpty(monitor.Description))
+                        Console.WriteLine($"  Name:              {monitor.Description}");
                     
                     if (!string.IsNullOrEmpty(monitor.Model))
-                        Console.WriteLine($"  Model:       {monitor.Model}");
+                        Console.WriteLine($"  Model:             {monitor.Model}");
+                    
+                    if (!string.IsNullOrEmpty(monitor.SerialNumber))
+                        Console.WriteLine($"  SerialNumber:      {monitor.SerialNumber}");
                     
                     if (!string.IsNullOrEmpty(monitor.Manufacturer))
-                        Console.WriteLine($"  Manufacturer: {monitor.Manufacturer}");
+                        Console.WriteLine($"  Manufacturer:      {monitor.Manufacturer}");
                     
-                    Console.WriteLine($"  Resolution:  {monitor.Width}x{monitor.Height}");
-                    Console.WriteLine($"  Primary:     {(monitor.IsPrimary ? "Yes" : "No")}");
+                    if (!string.IsNullOrEmpty(monitor.Firmware))
+                        Console.WriteLine($"  Firmware:          {monitor.Firmware}");
                     
-                    if (monitor.Brightness.HasValue)
-                        Console.WriteLine($"  Brightness:  {monitor.Brightness}%");
+                    if (monitor.WeekOfManufacture.HasValue)
+                        Console.WriteLine($"  WeekOfManufacture: {monitor.WeekOfManufacture}");
                     
-                    if (verbose && !string.IsNullOrEmpty(monitor.SerialNumber))
-                        Console.WriteLine($"  Serial:      {monitor.SerialNumber}");
+                    if (monitor.YearOfManufacture.HasValue)
+                        Console.WriteLine($"  YearOfManufacture: {monitor.YearOfManufacture}");
+                    
+                    if (verbose)
+                        Console.WriteLine($"  Device:            {monitor.DeviceName}");
                     
                     Console.WriteLine();
                 }

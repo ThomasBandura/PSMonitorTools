@@ -19,6 +19,7 @@ class Program
         rootCommand.AddCommand(SetVolumeCommand.Create());
         rootCommand.AddCommand(AudioCommand.Create());
         rootCommand.AddCommand(InputCommand.Create());
+        rootCommand.AddCommand(PbpCommand.Create());
         rootCommand.AddCommand(VcpCommand.Create());
 
         return await rootCommand.InvokeAsync(args);

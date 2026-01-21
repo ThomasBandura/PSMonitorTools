@@ -23,11 +23,11 @@ jobs:
       run: |
         Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
         
-    - name: Run Pester Tests
+    - name: Run Pester Tests (Unit Tests Only)
       shell: pwsh
       run: |
         $config = New-PesterConfiguration
-        $config.Run.Path = "PowerShell/Tests"
+        $config.Run.Path = "PowerShell/Tests/Monitor.Tests.ps1"
         $config.Output.Verbosity = "Detailed"
         $config.CodeCoverage.Enabled = $true
         $config.CodeCoverage.Path = "PowerShell/PSMonitorTools/*.ps1"

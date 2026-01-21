@@ -20,15 +20,59 @@ Simply download and run the executable from any location.
    ```
 
 ### Option 3: Build from Source
+
+#### Development Build
+Build for testing and development:
+```bash
+cd CSharp
+dotnet build
+```
+
+#### Release Build
+Build optimized release version:
 ```bash
 cd CSharp
 dotnet build -c Release
 ```
 
-For a self-contained executable:
+#### Run Tests
+```bash
+# Run all tests
+dotnet test
+
+# Run only unit tests
+dotnet test --filter "FullyQualifiedName~Core.Tests"
+
+# Run only integration tests
+dotnet test --filter "FullyQualifiedName~IntegrationTests"
+
+# Run with detailed output
+dotnet test --verbosity normal
+```
+
+#### Publish Single-File Executable
+
+**Framework-Dependent** (~1.2 MB, requires .NET 8 Runtime):
 ```bash
 cd CSharp
-dotnet publish src/MonitorTools.CLI -c Release -r win-x64 --self-contained
+dotnet publish src/MonitorTools.CLI/MonitorTools.CLI.csproj -c Release -r win-x64 -o publish
+```
+The executable will be in `publish/MonitorTools.exe`
+
+**Self-Contained** (~34 MB, no runtime needed):
+```bash
+cd CSharp
+dotnet publish src/MonitorTools.CLI/MonitorTools.CLI.csproj -c Release -r win-x64 --self-contained -o publish -p:EnableCompressionInSingleFile=true
+```
+The executable will be in `publish/MonitorTools.exe` and can run on any Windows x64 machine without .NET installed.
+
+**Other Platforms**:
+```bash
+# Windows x86 (32-bit)
+dotnet publish src/MonitorTools.CLI/MonitorTools.CLI.csproj -c Release -r win-x86 --self-contained -o publish
+
+# Windows ARM64
+dotnet publish src/MonitorTools.CLI/MonitorTools.CLI.csproj -c Release -r win-arm64 --self-contained -o publish
 ```
 
 ## Verify Installation
@@ -40,6 +84,5 @@ MonitorTools.exe --help
 
 ## Requirements
 
-- Windows 10/11 or Windows Server 2016+
+- Windows 11
 - .NET 8.0 Runtime (not required for self-contained builds)
-- Administrator rights may be required for some operations

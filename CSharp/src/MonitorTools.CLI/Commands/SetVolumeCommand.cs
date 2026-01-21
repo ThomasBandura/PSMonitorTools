@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to set audio volume of a monitor
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class SetVolumeCommand
 {
     public static Command Create()

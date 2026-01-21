@@ -95,10 +95,11 @@ public interface IMonitorService
     (uint currentValue, uint maximumValue) GetVcpFeature(byte vcpCode, int monitorIndex = 0);
 
     /// <summary>
-    /// Sets a VCP feature value
+    /// Sets a VCP feature value with retry logic
     /// </summary>
     /// <param name="vcpCode">VCP feature code</param>
     /// <param name="value">Value to set</param>
     /// <param name="monitorIndex">Monitor index (0-based)</param>
-    void SetVcpFeature(byte vcpCode, uint value, int monitorIndex = 0);
+    /// <param name="maxRetries">Maximum number of retry attempts</param>
+    void SetVcpFeature(byte vcpCode, uint value, int monitorIndex = 0, int maxRetries = 5);
 }

@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to get and set VCP features
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class VcpCommand
 {
     public static Command Create()

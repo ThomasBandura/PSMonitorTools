@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MonitorTools</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>0.8.0</Version>
     <Authors>Thomas Bandura</Authors>
     <Company>Thomas Bandura</Company>
     <Product>PSMonitorTools CLI</Product>
@@ -15,6 +15,11 @@
     <PackageProjectUrl>https://github.com/ThomasBandura/PSMonitorTools</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ThomasBandura/PSMonitorTools</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    
+    <!-- Single-file executable configuration -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>

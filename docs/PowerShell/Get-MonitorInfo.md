@@ -1,52 +1,211 @@
-# Get-MonitorInfo
+# PSMonitorTools PowerShell Module - Benutzerhandbuch
 
-## Synopsis
-Gets information about all connected monitors.
+## Übersicht
 
-## Syntax
+PSMonitorTools ist ein PowerShell-Modul zur Steuerung von Monitoren über DDC/CI (Display Data Channel Command Interface). Es ermöglicht das Abfragen und Setzen von Monitor-Einstellungen wie Helligkeit, Kontrast, Lautstärke, Eingabequellen und PBP-Modus.
+
+## Systemvoraussetzungen
+
+- Windows 11
+- PowerShell 5.1 oder höher
+- Monitor mit DDC/CI-Unterstützung
+
+## Installation
 
 ```powershell
-Get-MonitorInfo [<CommonParameters>]
+# Modul importieren
+Import-Module .\PSMonitorTools\PSMonitorTools.psd1
 ```
 
-## Description
-The `Get-MonitorInfo` cmdlet retrieves detailed information about all monitors connected to the system, including manufacturer, model, resolution, and brightness settings.
+## Verfügbare Cmdlets
 
-## Examples
+### Monitor-Informationen
 
-### Example 1: Get all monitors
+#### Get-MonitorInfo
+
+Zeigt Informationen über alle angeschlossenen Monitore an.
+
 ```powershell
 Get-MonitorInfo
+Get-MonitorInfo -MonitorName 'Dell'
 ```
-Returns information about all connected monitors.
 
-### Example 2: Get only primary monitor
+**Parameter:**
+- `-MonitorName` (optional): Filter nach Monitor-Name, Modell oder Hersteller
+
+**Rückgabewerte:**
+- `Index`: Monitor-Index (0-basiert)
+- `Name`: Monitor-Beschreibung
+- `Model`: Modellname
+- `SerialNumber`: Seriennummer
+- `Manufacturer`: Hersteller
+- `Firmware`: Firmware-Version (falls verfügbar)
+- `WeekOfManufacture`: Produktionswoche
+- `YearOfManufacture`: Produktionsjahr
+
+**Beispiele:**
+
 ```powershell
-Get-MonitorInfo | Where-Object { $_.IsPrimary -eq $true }
-```
-Filters to show only the primary monitor.
+# Alle Monitore anzeigen
+Get-MonitorInfo
 
-### Example 3: Export to JSON
+# Nur Dell-Monitore anzeigen
+Get-MonitorInfo -MonitorName 'Dell'
+
+# Nach Modell filtern
+Get-MonitorInfo -MonitorName 'U2723DE'
+```
+
+### Helligkeit
+
+#### Get-MonitorBrightness
+
+Zeigt die aktuelle Helligkeitsstufe eines Monitors an.
+
 ```powershell
-Get-MonitorInfo | ConvertTo-Json | Out-File monitors.json
+Get-MonitorBrightness -MonitorName 'Dell'
 ```
-Exports monitor information to a JSON file.
 
-## Outputs
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
 
-### PSCustomObject
-Returns objects with the following properties:
-- **Index**: Monitor index (0-based)
-- **DeviceName**: Windows device name
-- **Manufacturer**: Monitor manufacturer
-- **Model**: Monitor model name
-- **SerialNumber**: Serial number (if available)
-- **Width**: Screen width in pixels
-- **Height**: Screen height in pixels
-- **IsPrimary**: Whether this is the primary monitor
-- **Brightness**: Current brightness level (0-100, if supported)
+**Rückgabewerte:**
+- Objekt mit `Name`, `Model` und `Brightness`
 
-## Notes
-- Requires Windows 10/11 or Windows Server 2016+
-- Some monitors may not support brightness control
-- Administrator rights may be required for certain operations
+#### Set-MonitorBrightness
+
+Setzt die Helligkeitsstufe eines Monitors.
+
+```powershell
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 50
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+- `-Brightness` (erforderlich): Helligkeitswert (0-100)
+
+**Beispiele:**
+
+```powershell
+# Helligkeit auf 75% setzen
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 75
+
+# Mit WhatIf testen (keine Änderung)
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 50 -WhatIf
+
+# Mit Bestätigung
+Set-MonitorBrightness -MonitorName 'Dell' -Brightness 30 -Confirm
+```
+
+### Kontrast
+
+#### Get-MonitorContrast
+
+Zeigt die aktuelle Kontraststufe eines Monitors an.
+
+```powershell
+Get-MonitorContrast -MonitorName 'Dell'
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+
+#### Set-MonitorContrast
+
+Setzt die Kontraststufe eines Monitors.
+
+```powershell
+Set-MonitorContrast -MonitorName 'Dell' -Contrast 75
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+- `-Contrast` (erforderlich): Kontrastwert (0-100)
+
+### Audio / Lautstärke
+
+#### Get-MonitorAudioVolume
+
+Zeigt die aktuelle Lautstärke eines Monitors an.
+
+```powershell
+Get-MonitorAudioVolume -MonitorName 'Dell'
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+
+**Hinweis:** Funktioniert nur bei Monitoren mit integrierten Lautsprechern.
+
+#### Set-MonitorAudioVolume
+
+Setzt die Lautstärke eines Monitors.
+
+```powershell
+Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+- `-Volume` (erforderlich): Lautstärkewert (0-100)
+
+#### Get-MonitorAudio
+
+Zeigt den Stummschaltungsstatus eines Monitors an.
+
+```powershell
+Get-MonitorAudio -MonitorName 'Dell'
+```
+
+**Rückgabewerte:**
+- Objekt mit `Name`, `Model` und `AudioEnabled` ($true = unmuted, $false = muted)
+
+#### Enable-MonitorAudio
+
+Hebt die Stummschaltung auf (Unmute).
+
+```powershell
+Enable-MonitorAudio -MonitorName 'Dell'
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+
+#### Disable-MonitorAudio
+
+Schaltet den Monitor stumm (Mute).
+
+```powershell
+Disable-MonitorAudio -MonitorName 'Dell'
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+
+### Eingabequellen
+
+#### Get-MonitorInput
+
+Zeigt die aktuelle(n) Eingabequelle(n) eines Monitors an.
+
+```powershell
+Get-MonitorInput -MonitorName 'Dell'
+```
+
+**Parameter:**
+- `-MonitorName` (erforderlich): Name oder Modell des Monitors
+
+**Rückgabewerte:**
+- `Name`: Monitor-Beschreibung
+- `Model`: Modellname
+- `PBP`: PBP-Status ($true/$false)
+- `InputLeft`: Linke/Primäre Eingabequelle
+- `InputRight`: Rechte Eingabequelle (nur wenn PBP aktiv)
+
+**Mögliche Eingabequellen:**
+- `Hdmi1` (0x11)
+- `Hdmi2` (0x12)
+- `DisplayPort` (0x0F)
+- `UsbC` (0x1B)
+- `Unknown (0xXX)` bei unbekannten Werten
+

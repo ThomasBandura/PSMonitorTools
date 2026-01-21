@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to control audio mute state
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class AudioCommand
 {
     public static Command Create()

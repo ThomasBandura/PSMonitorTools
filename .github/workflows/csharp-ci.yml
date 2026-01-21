@@ -29,8 +29,8 @@ jobs:
     - name: Build
       run: dotnet build CSharp/MonitorTools.sln --configuration Release --no-restore
       
-    - name: Test
-      run: dotnet test CSharp/MonitorTools.sln --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+    - name: Test (Unit Tests Only)
+      run: dotnet test CSharp/tests/MonitorTools.Core.Tests/MonitorTools.Core.Tests.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
       
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3

@@ -24,6 +24,6 @@ Get-Command -Module PSMonitorTools
 
 ## Requirements
 
-- Windows 10/11 or Windows Server 2016+
-- PowerShell 5.1 or PowerShell 7+
-- Administrator rights may be required for some operations
+- Windows 11
+- PowerShell 5.1 or newer
+

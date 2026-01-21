@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to get brightness of a monitor
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class GetBrightnessCommand
 {
     public static Command Create()

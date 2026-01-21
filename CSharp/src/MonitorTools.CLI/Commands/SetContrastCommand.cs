@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to set contrast of a monitor
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class SetContrastCommand
 {
     public static Command Create()

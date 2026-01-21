@@ -4,7 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>1.0.0</Version>
+    <Version>0.8.0</Version>
     <Authors>Thomas Bandura</Authors>
     <Company>Thomas Bandura</Company>
     <Product>PSMonitorTools</Product>
@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.2" />
   </ItemGroup>
 
 </Project>

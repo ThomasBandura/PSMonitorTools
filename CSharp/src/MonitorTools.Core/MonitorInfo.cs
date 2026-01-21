@@ -16,6 +16,11 @@ public class MonitorInfo
     public string DeviceName { get; set; } = string.Empty;
 
     /// <summary>
+    /// Monitor description (from physical monitor API)
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
     /// Monitor manufacturer
     /// </summary>
     public string Manufacturer { get; set; } = string.Empty;
@@ -29,6 +34,21 @@ public class MonitorInfo
     /// Monitor serial number
     /// </summary>
     public string SerialNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Firmware version
+    /// </summary>
+    public string? Firmware { get; set; }
+
+    /// <summary>
+    /// Week of manufacture
+    /// </summary>
+    public int? WeekOfManufacture { get; set; }
+
+    /// <summary>
+    /// Year of manufacture
+    /// </summary>
+    public int? YearOfManufacture { get; set; }
 
     /// <summary>
     /// Screen resolution width

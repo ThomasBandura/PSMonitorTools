@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to get and set monitor input source
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class InputCommand
 {
     public static Command Create()
@@ -25,7 +26,16 @@ public static class InputCommand
             {
                 var service = new MonitorService();
                 var input = service.GetInput(monitorIndex);
-                Console.WriteLine($"Monitor {monitorIndex} input: {input}");
+                
+                // Check if the value is a valid enum
+                if (Enum.IsDefined(typeof(MonitorInput), input))
+                {
+                    Console.WriteLine($"Monitor {monitorIndex} input: {input}");
+                }
+                else
+                {
+                    Console.WriteLine($"Monitor {monitorIndex} input: Unknown (0x{(int)input:X2})");
+                }
             }
             catch (Exception ex)
             {

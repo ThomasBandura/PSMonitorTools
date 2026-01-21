@@ -6,6 +6,7 @@ namespace MonitorTools.CLI.Commands;
 /// <summary>
 /// Command to set brightness of a monitor
 /// </summary>
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class SetBrightnessCommand
 {
     public static Command Create()
