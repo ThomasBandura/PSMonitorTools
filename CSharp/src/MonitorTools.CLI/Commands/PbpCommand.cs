@@ -71,11 +71,39 @@ public static class PbpCommand
             }
         });
 
-        var setRightCommand = new Command("set-right", "Set right input source for PBP");
-        var inputArg = new Argument<string>(
+        var setLeftCommand = new Command("set-left", "Set left input source for PBP");
+        var leftInputArg = new Argument<string>(
             name: "input",
             description: "Input source (Hdmi1, Hdmi2, DisplayPort, UsbC)");
-        setRightCommand.AddArgument(inputArg);
+        setLeftCommand.AddArgument(leftInputArg);
+        setLeftCommand.SetHandler((string input) =>
+        {
+            var service = new MonitorService();
+            try
+            {
+                if (!Enum.TryParse<MonitorInput>(input, true, out var inputEnum))
+                {
+                    Console.WriteLine($"Invalid input source: {input}");
+                    Console.WriteLine("Valid values: Hdmi1, Hdmi2, DisplayPort, UsbC");
+                    Environment.Exit(1);
+                    return;
+                }
+
+                service.SetInput(inputEnum);
+                Console.WriteLine($"PBP left input set to {inputEnum}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                Environment.Exit(1);
+            }
+        }, leftInputArg);
+
+        var setRightCommand = new Command("set-right", "Set right input source for PBP");
+        var rightInputArg = new Argument<string>(
+            name: "input",
+            description: "Input source (Hdmi1, Hdmi2, DisplayPort, UsbC)");
+        setRightCommand.AddArgument(rightInputArg);
         setRightCommand.SetHandler((string input) =>
         {
             var service = new MonitorService();
@@ -97,11 +125,12 @@ public static class PbpCommand
                 Console.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        }, inputArg);
+        }, rightInputArg);
 
         pbpCommand.AddCommand(statusCommand);
         pbpCommand.AddCommand(enableCommand);
         pbpCommand.AddCommand(disableCommand);
+        pbpCommand.AddCommand(setLeftCommand);
         pbpCommand.AddCommand(setRightCommand);
 
         return pbpCommand;

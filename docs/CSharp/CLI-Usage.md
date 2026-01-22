@@ -205,6 +205,10 @@ MonitorTools pbp enable -m 0
 MonitorTools pbp disable
 MonitorTools pbp disable -m 0
 
+# Linke Eingabequelle für PBP setzen
+MonitorTools pbp set-left Hdmi1
+MonitorTools pbp set-left DisplayPort -m 0
+
 # Rechte Eingabequelle für PBP setzen
 MonitorTools pbp set-right Hdmi2
 MonitorTools pbp set-right UsbC -m 0
@@ -214,12 +218,13 @@ MonitorTools pbp set-right UsbC -m 0
 - `status`: Zeigt den PBP-Status und die rechte Eingabequelle
 - `enable`: Aktiviert PBP-Modus
 - `disable`: Deaktiviert PBP-Modus
+- `set-left <input>`: Setzt die linke Eingabequelle für PBP
 - `set-right <input>`: Setzt die rechte Eingabequelle für PBP
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
 
-**Hinweis:** PBP ist eine herstellerspezifische Funktion. Nicht alle Monitore unterstützen PBP. Die linke Eingabequelle wird mit `input set` gesteuert.
+**Hinweis:** PBP ist eine herstellerspezifische Funktion. Nicht alle Monitore unterstützen PBP. Der `set-left` Befehl ist ein Alias für `input set` und steuert VCP Code 0x60 (primärer Eingang).
 
 ### VCP (Low-Level DDC/CI-Steuerung)
 
