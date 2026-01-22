@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MonitorTools</AssemblyName>
-    <Version>0.8.0</Version>
+    <Version>0.8.1</Version>
     <Authors>Thomas Bandura</Authors>
     <Company>Thomas Bandura</Company>
     <Product>PSMonitorTools CLI</Product>
