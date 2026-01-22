@@ -6,6 +6,10 @@ Windows-Monitorsteuerung über DDC/CI - verfügbar als PowerShell-Modul und C# C
 [![C# CI](https://github.com/ThomasBandura/PSMonitorTools/workflows/C%23%20CI/badge.svg)](https://github.com/ThomasBandura/PSMonitorTools/actions)
 [![License](https://img.shields.io/github/license/ThomasBandura/PSMonitorTools)](LICENSE)
 
+## License
+
+This repository is licensed under the MIT License. See the LICENSE file for details.
+
 ## 📦 Verfügbare Implementierungen
 
 ### 🔷 PowerShell Module
