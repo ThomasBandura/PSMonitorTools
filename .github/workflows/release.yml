@@ -92,6 +92,12 @@ jobs:
         name: MonitorTools-CLI-win-x86
         path: ./artifacts/csharp/win-x86
         
+    - name: Rename executables
+      shell: pwsh
+      run: |
+        Move-Item -Path "./artifacts/csharp/win-x64/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x64.exe"
+        Move-Item -Path "./artifacts/csharp/win-x86/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x86.exe"
+        
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
@@ -99,8 +105,8 @@ jobs:
         prerelease: false
         files: |
           ./artifacts/powershell/*.zip
-          ./artifacts/csharp/win-x64/MonitorTools.exe
-          ./artifacts/csharp/win-x86/MonitorTools.exe
+          ./artifacts/MonitorTools-win-x64.exe
+          ./artifacts/MonitorTools-win-x86.exe
         fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
