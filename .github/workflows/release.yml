@@ -9,60 +9,41 @@ permissions:
   contents: write
 
 jobs:
-  create-release:
-    runs-on: windows-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.version }}
-    
-    steps:
-    - name: Get version from tag
-      id: get_version
-      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-      shell: bash
-      
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
-
   build-powershell:
     runs-on: windows-latest
-    needs: create-release
     
     steps:
     - uses: actions/checkout@v3
     
+    - name: Get version from tag
+      id: get_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      shell: bash
+    
     - name: Build PowerShell Module
       shell: pwsh
       run: |
-        ./PowerShell/Build/build.ps1 -Version "${{ needs.create-release.outputs.version }}"
+        ./PowerShell/Build/build.ps1 -Version "${{ steps.get_version.outputs.version }}"
         
     - name: Upload PowerShell Module
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: actions/upload-artifact@v4
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./releases/PowerShell/PSMonitorTools-v${{ needs.create-release.outputs.version }}.zip
-        asset_name: PSMonitorTools-v${{ needs.create-release.outputs.version }}.zip
-        asset_content_type: application/zip
+        name: PSMonitorTools-Module
+        path: ./releases/PowerShell/PSMonitorTools-v${{ steps.get_version.outputs.version }}.zip
 
   build-csharp:
     runs-on: windows-latest
-    needs: create-release
     strategy:
       matrix:
         runtime: [win-x64, win-x86]
     
     steps:
     - uses: actions/checkout@v3
+    
+    - name: Get version from tag
+      id: get_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      shell: bash
     
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
@@ -78,14 +59,48 @@ jobs:
           --output "releases/CSharp/${{ matrix.runtime }}" `
           -p:PublishSingleFile=true `
           -p:IncludeNativeLibrariesForSelfExtract=true `
-          -p:Version="${{ needs.create-release.outputs.version }}"
+          -p:Version="${{ steps.get_version.outputs.version }}"
           
     - name: Upload C# CLI
-      uses: actions/upload-release-asset@v1
+      uses: actions/upload-artifact@v4
+      with:
+        name: MonitorTools-CLI-${{ matrix.runtime }}
+        path: ./releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe
+
+  create-release:
+    runs-on: windows-latest
+    needs: [build-powershell, build-csharp]
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Download PowerShell Module
+      uses: actions/download-artifact@v4
+      with:
+        name: PSMonitorTools-Module
+        path: ./artifacts/powershell
+        
+    - name: Download C# CLI (win-x64)
+      uses: actions/download-artifact@v4
+      with:
+        name: MonitorTools-CLI-win-x64
+        path: ./artifacts/csharp/win-x64
+        
+    - name: Download C# CLI (win-x86)
+      uses: actions/download-artifact@v4
+      with:
+        name: MonitorTools-CLI-win-x86
+        path: ./artifacts/csharp/win-x86
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        draft: false
+        prerelease: false
+        files: |
+          ./artifacts/powershell/*.zip
+          ./artifacts/csharp/win-x64/MonitorTools.exe
+          ./artifacts/csharp/win-x86/MonitorTools.exe
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe
-        asset_name: MonitorTools-${{ matrix.runtime }}.exe
-        asset_content_type: application/octet-stream
