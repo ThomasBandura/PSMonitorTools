@@ -95,18 +95,8 @@ jobs:
     - name: Prepare release assets
       shell: pwsh
       run: |
-        # List downloaded files
-        Write-Host "Files in artifacts:"
-        Get-ChildItem -Recurse ./artifacts
-        
-        # Copy and rename executables
         Copy-Item -Path "./artifacts/csharp/win-x64/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x64.exe"
         Copy-Item -Path "./artifacts/csharp/win-x86/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x86.exe"
-        
-        # Verify files exist
-        Write-Host "`nRelease assets:"
-        Get-ChildItem ./artifacts -Filter "*.exe"
-        Get-ChildItem ./artifacts/powershell -Filter "*.zip"
         
     - name: Create Release
       uses: softprops/action-gh-release@v1

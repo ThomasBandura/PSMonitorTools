@@ -5,6 +5,14 @@ All notable changes to PSMonitorTools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-01-23
+
+### Fixed
+- Fixed deprecated `set-output` command in GitHub Actions workflows
+- Replaced deprecated `actions/create-release@v1` and `actions/upload-release-asset@v1` with `softprops/action-gh-release@v1`
+- Fixed release asset naming conflict by renaming executables to `MonitorTools-win-x64.exe` and `MonitorTools-win-x86.exe`
+- Improved release workflow reliability and modernized GitHub Actions implementation
+
 ## [0.8.1] - 2026-01-22
 
 ### Changed
