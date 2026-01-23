@@ -92,11 +92,21 @@ jobs:
         name: MonitorTools-CLI-win-x86
         path: ./artifacts/csharp/win-x86
         
-    - name: Rename executables
+    - name: Prepare release assets
       shell: pwsh
       run: |
-        Move-Item -Path "./artifacts/csharp/win-x64/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x64.exe"
-        Move-Item -Path "./artifacts/csharp/win-x86/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x86.exe"
+        # List downloaded files
+        Write-Host "Files in artifacts:"
+        Get-ChildItem -Recurse ./artifacts
+        
+        # Copy and rename executables
+        Copy-Item -Path "./artifacts/csharp/win-x64/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x64.exe"
+        Copy-Item -Path "./artifacts/csharp/win-x86/MonitorTools.exe" -Destination "./artifacts/MonitorTools-win-x86.exe"
+        
+        # Verify files exist
+        Write-Host "`nRelease assets:"
+        Get-ChildItem ./artifacts -Filter "*.exe"
+        Get-ChildItem ./artifacts/powershell -Filter "*.zip"
         
     - name: Create Release
       uses: softprops/action-gh-release@v1
