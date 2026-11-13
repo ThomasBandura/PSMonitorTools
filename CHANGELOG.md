@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - C#: manufacturer, model and serial number are assigned per monitor instead of using the first WMI entry for all (#3).
-- PowerShell: `Switch-MonitorInput` verifies only once and reports a missing DDC/CI response after switching away as a warning (#9).
+- PowerShell: `Switch-MonitorInput` verifies each step once (no second verification loop) and reports a missing DDC/CI response after switching away as a warning (#9).
+- PowerShell: transient DDC/CI read failures are retried (up to 3 attempts), e.g. right after an input or PBP change.
+- C#: monitor handles are looked up per call, so a long-lived `MonitorService` keeps working after PBP changes re-enumerate the display.
 
 ### Changed
 - C#: WMI, brightness and firmware data are loaded lazily, only for `get-info` (#22).

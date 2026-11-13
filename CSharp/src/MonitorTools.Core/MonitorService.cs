@@ -13,7 +13,6 @@ namespace MonitorTools.Core;
 public class MonitorService : IMonitorService
 {
     private readonly List<MonitorInfo> _monitors = new();
-    private readonly List<IntPtr> _monitorHandles = new();
     private bool _detailsLoaded;
 
     /// <summary>
@@ -370,7 +369,6 @@ public class MonitorService : IMonitorService
     private void EnumerateMonitors()
     {
         _monitors.Clear();
-        _monitorHandles.Clear();
         _detailsLoaded = false;
         int index = 0;
 
@@ -391,7 +389,6 @@ public class MonitorService : IMonitorService
                     Height = monitorInfo.rcMonitor.Bottom - monitorInfo.rcMonitor.Top,
                     IsPrimary = (monitorInfo.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0
                 });
-                _monitorHandles.Add(hMonitor);
             }
 
             return true;
@@ -421,7 +418,11 @@ public class MonitorService : IMonitorService
         {
             try
             {
-                EnrichMonitorInfo(_monitors[i], _monitorHandles[i], wmiMonitors);
+                var hMonitor = GetMonitorHandle(i);
+                if (hMonitor == IntPtr.Zero)
+                    throw new InvalidOperationException("Monitor handle not found");
+
+                EnrichMonitorInfo(_monitors[i], hMonitor, wmiMonitors);
             }
             catch (Exception ex)
             {
@@ -631,8 +632,27 @@ public class MonitorService : IMonitorService
         });
     }
 
+    /// <summary>
+    /// Resolves the HMONITOR for an index. The handle is looked up on every call because Windows
+    /// re-creates it when the display is re-enumerated (e.g. after switching PBP, which changes the EDID).
+    /// </summary>
     private IntPtr GetMonitorHandle(int index)
     {
-        return index >= 0 && index < _monitorHandles.Count ? _monitorHandles[index] : IntPtr.Zero;
+        IntPtr result = IntPtr.Zero;
+        int currentIndex = 0;
+
+        NativeMethods.MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData) =>
+        {
+            if (currentIndex == index)
+            {
+                result = hMonitor;
+                return false; // Stop enumeration
+            }
+            currentIndex++;
+            return true;
+        };
+
+        NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
+        return result;
     }
 }

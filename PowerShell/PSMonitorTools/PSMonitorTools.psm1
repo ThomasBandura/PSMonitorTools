@@ -122,26 +122,43 @@ function Invoke-VcpGet {
     <#
     .SYNOPSIS
         Helper function to get VCP feature value with standardized error handling
+    .DESCRIPTION
+        DDC/CI reads fail occasionally, e.g. while the monitor re-syncs after an input or PBP
+        change. Failed reads are therefore retried (default: 3 attempts, 500 ms apart).
+        Callers that already poll in a loop pass -MaxAttempts 1.
     #>
     param(
         [Parameter(Mandatory=$true)]
         [IntPtr]$MonitorHandle,
-        
+
         [Parameter(Mandatory=$true)]
         [byte]$VcpCode,
-        
+
         [Parameter(Mandatory=$false)]
-        [string]$FeatureName
+        [string]$FeatureName,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateRange(1, 10)]
+        [int]$MaxAttempts = 3,
+
+        [Parameter(Mandatory=$false)]
+        [int]$RetryDelayMilliseconds = 500
     )
-    
+
     [uint32]$currentValue = 0
     [uint32]$maxValue = 0
-    
-    if ([PSMonitorTools.Native.MonitorHelper]::GetVcpFeature($MonitorHandle, $VcpCode, [ref]$currentValue, [ref]$maxValue)) {
-        return $currentValue
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        if ([PSMonitorTools.Native.MonitorHelper]::GetVcpFeature($MonitorHandle, $VcpCode, [ref]$currentValue, [ref]$maxValue)) {
+            return $currentValue
+        }
+
+        Write-Verbose ("Failed to read VCP code 0x{0:X2} ($FeatureName), attempt $attempt/$MaxAttempts" -f $VcpCode)
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Milliseconds $RetryDelayMilliseconds
+        }
     }
-    
-    Write-Verbose ("Failed to read VCP code 0x{0:X2} ($FeatureName)" -f $VcpCode)
+
     return $null
 }
 
@@ -200,7 +217,7 @@ function Invoke-VcpSet {
         $verified = $false
         while ($sw.Elapsed.TotalSeconds -lt 10) {
             Start-Sleep -Milliseconds 500
-            $current = Invoke-VcpGet -MonitorHandle $MonitorHandle -VcpCode $VcpCode -FeatureName $FeatureName
+            $current = Invoke-VcpGet -MonitorHandle $MonitorHandle -VcpCode $VcpCode -FeatureName $FeatureName -MaxAttempts 1
             if ($null -ne $current -and (($current -band 0xFF) -eq ($Value -band 0xFF))) {
                 $verified = $true
                 Write-Verbose ("Verified $FeatureName switched to 0x{0:X}" -f ($current -band 0xFF))
@@ -515,20 +532,49 @@ function Switch-MonitorInput {
             }
         }
         
-        # Helper for Set (verification happens once after all steps, see below)
-        $FnSet = {
-            param($Code, $Val, $Desc)
-            return Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $Code -Value $Val `
-                -MonitorDescription $pm.Description -FeatureName $Desc -SkipVerification
+        # Waits until the monitor reports the expected value for one step.
+        # Returns 'Verified', 'Mismatch' (monitor answered with a different value) or
+        # 'NoResponse' (monitor did not answer DDC/CI at all).
+        # Each step must be confirmed before the next one is sent: the monitor accepts but ignores
+        # commands while it is still re-syncing after the previous switch.
+        $FnWaitForStep = {
+            param($Step, [int]$TimeoutSeconds = 10)
+
+            $expected = $Step.Input -band 0xFF
+            $anyResponse = $false
+            $lastActual = $null
+            $maxPolls = $TimeoutSeconds * 2   # one poll every 500 ms
+            for ($poll = 1; $poll -le $maxPolls; $poll++) {
+                Start-Sleep -Milliseconds 500
+                $raw = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $Step.Code -FeatureName $Step.Desc -MaxAttempts 1
+                if ($null -eq $raw) {
+                    Write-Verbose "$($Step.Desc): no DDC/CI response (poll $poll/$maxPolls)"
+                    continue
+                }
+                $anyResponse = $true
+                $lastActual = $raw -band 0xFF
+                if ($lastActual -eq $expected) {
+                    Write-Verbose ("$($Step.Desc) verified as 0x{0:X2} (poll $poll/$maxPolls)" -f $lastActual)
+                    return [pscustomobject]@{ Status = 'Verified'; Message = $null }
+                }
+            }
+
+            if (-not $anyResponse) {
+                return [pscustomobject]@{ Status = 'NoResponse'; Message = $null }
+            }
+            return [pscustomobject]@{
+                Status  = 'Mismatch'
+                Message = "$($Step.Desc): expected 0x{0:X2}, got 0x{1:X2}" -f $expected, $lastActual
+            }
         }
 
         # Define steps
         $steps = [System.Collections.Generic.List[psobject]]::new()
-        if ($doSetLeft) { 
-            $steps.Add([pscustomobject]@{ Type="Left"; Code=$script:VcpCodes.InputSource; Input=[uint32]$InputLeft; MaskPbp=$true }) 
+        if ($doSetLeft) {
+            $steps.Add([pscustomobject]@{ Type="Left"; Desc="Primary/Left Input"; Code=$script:VcpCodes.InputSource; Input=[uint32]$InputLeft; MaskPbp=$true })
         }
-        if ($doSetRight) { 
-            $steps.Add([pscustomobject]@{ Type="Right"; Code=$script:VcpCodes.PbpRightInput; Input=[uint32]$InputRight; MaskPbp=$false }) 
+        if ($doSetRight) {
+            $steps.Add([pscustomobject]@{ Type="Right"; Desc="Secondary/Right Input"; Code=$script:VcpCodes.PbpRightInput; Input=[uint32]$InputRight; MaskPbp=$false })
         }
 
         # Smart Ordering: Collision Detection
@@ -540,90 +586,49 @@ function Switch-MonitorInput {
             }
         }
 
+        $noResponse = $false
         foreach ($step in $steps) {
             $val = $step.Input
-            
+
             # If PBP is active, mask Left input with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
             if ($pbpActive -and $step.MaskPbp) {
                 $val = $script:PbpModeValues.LeftInputMask + $val
                 Write-Verbose ("PBP is active. Using masked value 0x{0:X} for Left Input." -f $val)
             }
 
-            $desc = if ($step.Type -eq "Left") { "Primary/Left Input" } else { "Secondary/Right Input" }
-
-            if ($cmdletContext.ShouldProcess($pm.Description, ("Set $desc to 0x{0:X}" -f $val))) {
-                if (-not (& $FnSet $step.Code $val $desc)) {
-                    $success = $false
-                }
-            } else {
+            if (-not $cmdletContext.ShouldProcess($pm.Description, ("Set $($step.Desc) to 0x{0:X}" -f $val))) {
                 return $false
             }
+
+            $set = Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $step.Code -Value $val `
+                -MonitorDescription $pm.Description -FeatureName $step.Desc -SkipVerification
+            if (-not $set) {
+                return $false
+            }
+
+            # The right input is only meaningful (and readable) while PBP is active
+            if ($step.Type -eq 'Right' -and -not $pbpActive) {
+                continue
+            }
+
+            # Verify this step before sending the next one
+            $check = & $FnWaitForStep $step
+            switch ($check.Status) {
+                'Mismatch' {
+                    Write-Error "Failed to verify input state on $($pm.Description): $($check.Message)"
+                    return $false
+                }
+                'NoResponse' {
+                    # After switching to an input this PC is not connected to, the monitor usually stops
+                    # answering DDC/CI requests. That is expected and reported as a warning, not an error.
+                    $noResponse = $true
+                }
+            }
         }
-        
-        # Verification: Wait and verify the actual state matches what we requested.
-        # After switching to an input this PC is not connected to, the monitor usually stops
-        # answering DDC/CI requests. That is expected and reported as a warning, not an error.
-        if ($success) {
-            Write-Verbose "Verifying monitor state..."
-            $verified = $false
-            $anyResponse = $false
-            $lastMismatch = $null
-            $verifyRetry = 0
-            $maxVerifyRetries = 8
 
-            while (-not $verified -and $verifyRetry -lt $maxVerifyRetries) {
-                Start-Sleep -Seconds 1
-                $verifyRetry++
-
-                $actualLeftRaw = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.InputSource -FeatureName 'Input Source'
-                if ($null -eq $actualLeftRaw) {
-                    Write-Verbose "No DDC/CI response. Retry $verifyRetry/$maxVerifyRetries"
-                    continue
-                }
-                $anyResponse = $true
-
-                # Check if Left input matches (if we set it)
-                $leftMatches = $true
-                if ($doSetLeft) {
-                    $actualLeft = $actualLeftRaw -band 0xFF
-                    $expectedLeft = [uint32]$InputLeft -band 0xFF
-                    $leftMatches = ($actualLeft -eq $expectedLeft)
-                    if (-not $leftMatches) {
-                        $lastMismatch = "Left input: expected 0x{0:X2}, got 0x{1:X2}" -f $expectedLeft, $actualLeft
-                    }
-                }
-
-                # Check if Right input matches (if we set it and PBP is active)
-                $rightMatches = $true
-                if ($doSetRight -and $pbpActive) {
-                    $actualRightRaw = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpRightInput -FeatureName 'PBP Right Input'
-                    if ($null -ne $actualRightRaw) {
-                        $actualRight = $actualRightRaw -band 0xFF
-                        $expectedRight = [uint32]$InputRight -band 0xFF
-                        $rightMatches = ($actualRight -eq $expectedRight)
-                        if (-not $rightMatches) {
-                            $lastMismatch = "Right input: expected 0x{0:X2}, got 0x{1:X2}" -f $expectedRight, $actualRight
-                        }
-                    }
-                }
-
-                if ($leftMatches -and $rightMatches) {
-                    $verified = $true
-                    Write-Verbose "Input state verified after $verifyRetry attempt(s)"
-                } else {
-                    Write-Verbose "$lastMismatch. Retry $verifyRetry/$maxVerifyRetries"
-                }
-            }
-
-            if (-not $verified) {
-                if (-not $anyResponse) {
-                    Write-Warning ("Input switched on '$($pm.Description)', but the monitor no longer answers DDC/CI. " +
-                        "This is expected if this PC is not connected to the new input.")
-                } else {
-                    Write-Error "Failed to verify input state on $($pm.Description): $lastMismatch"
-                    $success = $false
-                }
-            }
+        if ($noResponse) {
+            Write-Warning ("Input switched on '$($pm.Description)', but the monitor did not answer DDC/CI to confirm it. " +
+                "This is expected if this PC is not connected to the new input.")
         }
 
         return $success

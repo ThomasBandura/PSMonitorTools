@@ -296,7 +296,7 @@ Describe 'Monitor module logic (mocked hardware)' {
                     -WarningVariable warn -WarningAction SilentlyContinue -ErrorVariable err -ErrorAction SilentlyContinue
 
                 $result | Should -BeTrue
-                "$warn" | Should -Match 'no longer answers DDC/CI'
+                "$warn" | Should -Match 'did not answer DDC/CI'
                 $err | Should -BeNullOrEmpty
             }
         }
@@ -308,6 +308,22 @@ Describe 'Monitor module logic (mocked hardware)' {
                 Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false | Should -BeTrue
 
                 Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $SkipVerification }
+            }
+        }
+
+        It 'sends the right input only after the left input was confirmed (PBP)' {
+            InModuleScope PSMonitorTools {
+                $script:calls = [System.Collections.Generic.List[string]]::new()
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }   # PBP on
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { $script:calls.Add('get 60'); 0xF11 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { $script:calls.Add('get E8'); 0x1B }
+                Mock Invoke-VcpSet { $script:calls.Add(('set {0:X2}' -f $VcpCode)); $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -InputRight UsbC -Confirm:$false | Should -BeTrue
+
+                # Collision detection reads 60/E8 first; afterwards: set left, confirm left, set right, confirm right
+                $afterReads = $script:calls[2..($script:calls.Count - 1)]
+                $afterReads | Should -Be @('set 60', 'get 60', 'set E8', 'get E8')
             }
         }
 
