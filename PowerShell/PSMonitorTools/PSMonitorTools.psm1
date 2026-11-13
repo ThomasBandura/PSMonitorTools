@@ -107,10 +107,11 @@ function ForEach-PhysicalMonitor {
                 $wmiFriendlyName = if ($wmiMonitor) { Convert-WmiString $wmiMonitor.UserFriendlyName } else { $null }
 
                 if (-not [string]::IsNullOrWhiteSpace($MonitorName)) {
+                     $namePattern = "*$([WildcardPattern]::Escape($MonitorName))*"
                      Write-Verbose "Checking monitor: Description='$($pmSafe.Description)', Model='$model', WmiName='$wmiFriendlyName' against '$MonitorName'"
-                     if (-not (($pmSafe.Description -and $pmSafe.Description -like "*$MonitorName*") -or 
-                        ($model -and $model -like "*$MonitorName*") -or 
-                        ($wmiFriendlyName -and $wmiFriendlyName -like "*$MonitorName*"))) {
+                     if (-not (($pmSafe.Description -and $pmSafe.Description -like $namePattern) -or 
+                        ($model -and $model -like $namePattern) -or 
+                        ($wmiFriendlyName -and $wmiFriendlyName -like $namePattern))) {
                         continue
                     }
                 }
@@ -433,88 +434,6 @@ function Get-MonitorInput {
 }
 
 Export-ModuleMember -Function Get-MonitorInput
-
-function Wait-MonitorInput {
-    <#
-    .SYNOPSIS
-        Waits for a monitor to reach a specific input state with retry logic
-    .DESCRIPTION
-        This function repeatedly checks the monitor input state until a specified condition is met
-        or the maximum number of retries is reached. Useful for waiting after input switches
-        when DDC/CI communication may be temporarily unavailable.
-    .PARAMETER MonitorName
-        Name or model of the monitor to query
-    .PARAMETER Condition
-        A scriptblock that receives the monitor state and returns $true when the desired state is reached
-    .PARAMETER MaxRetries
-        Maximum number of retry attempts (default: 5)
-    .PARAMETER RetryDelaySeconds
-        Delay in seconds between retry attempts (default: 2)
-    .PARAMETER TimeoutSeconds
-        Alternative to MaxRetries: total timeout in seconds
-    .EXAMPLE
-        Wait-MonitorInput -MonitorName 'Dell' -Condition { param($s) $s.InputLeft -eq 'Hdmi1' }
-    .EXAMPLE
-        Wait-MonitorInput -MonitorName 'Dell' -Condition { param($s) $s.PBP -and $s.InputRight -eq 'UsbC' } -MaxRetries 10
-    #>
-    [CmdletBinding(DefaultParameterSetName='Retries')]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$MonitorName,
-        
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$Condition,
-        
-        [Parameter(ParameterSetName='Retries')]
-        [int]$MaxRetries = 5,
-        
-        [Parameter(ParameterSetName='Retries')]
-        [Parameter(ParameterSetName='Timeout')]
-        [int]$RetryDelaySeconds = 2,
-        
-        [Parameter(ParameterSetName='Timeout')]
-        [int]$TimeoutSeconds
-    )
-    
-    if ($PSCmdlet.ParameterSetName -eq 'Timeout') {
-        $MaxRetries = [Math]::Ceiling($TimeoutSeconds / $RetryDelaySeconds)
-    }
-    
-    $attempt = 0
-    $lastState = $null
-    
-    while ($attempt -lt $MaxRetries) {
-        if ($attempt -gt 0) {
-            Start-Sleep -Seconds $RetryDelaySeconds
-        }
-        
-        try {
-            $state = Get-MonitorInput -MonitorName $MonitorName -ErrorAction Stop
-            $lastState = $state
-            
-            # Check if condition is met
-            if (& $Condition $state) {
-                Write-Verbose "Monitor state condition met after $($attempt + 1) attempt(s)"
-                return $state
-            }
-        } catch {
-            Write-Warning "Failed to read monitor state (attempt $($attempt + 1)/$MaxRetries): $_"
-        }
-        
-        $attempt++
-    }
-    
-    # Condition not met within retry limit
-    if ($lastState) {
-        Write-Warning "Monitor state condition not met after $MaxRetries attempts. Last state: PBP=$($lastState.PBP), Left=$($lastState.InputLeft), Right=$($lastState.InputRight)"
-    } else {
-        Write-Warning "Failed to read monitor state after $MaxRetries attempts."
-    }
-    
-    return $lastState
-}
-
-# Wait-MonitorInput is an internal helper function, not exported
 
 function Switch-MonitorInput {
     <#
@@ -1059,9 +978,11 @@ Register-ArgumentCompleter -CommandName Get-MonitorInfo, Get-MonitorInput, Get-M
 
     # 3. Filter and return
     $results = $candidates | Sort-Object -Unique
+    $word = $wordToComplete.Trim([char[]]"'`"")
+    $wordPattern = "*$([WildcardPattern]::Escape($word))*"
     foreach ($val in $results) {
-        if ($val -like "*$wordToComplete*") {
-            $quoted = "'$val'"
+        if ($val -like $wordPattern) {
+            $quoted = "'" + ($val -replace "'", "''") + "'"
             [System.Management.Automation.CompletionResult]::new($quoted, $val, 'ParameterValue', $val)
         }
     }

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Management;
 using MonitorTools.Core.Interfaces;
@@ -249,41 +251,22 @@ public class MonitorService : IMonitorService
     /// </summary>
     public (uint currentValue, uint maximumValue) GetVcpFeature(byte vcpCode, int monitorIndex = 0)
     {
-        if (monitorIndex < 0 || monitorIndex >= _monitors.Count)
-            throw new ArgumentOutOfRangeException(nameof(monitorIndex), "Invalid monitor index");
+        ValidateMonitorIndex(monitorIndex);
 
-        IntPtr monitorHandle = GetMonitorHandle(monitorIndex);
-        if (monitorHandle == IntPtr.Zero)
-            throw new InvalidOperationException("Could not get monitor handle");
-
-        if (NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount) && monitorCount > 0)
+        return WithPhysicalMonitor(monitorIndex, pm =>
         {
-            var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
-            if (NativeMethods.GetPhysicalMonitorsFromHMONITOR(monitorHandle, monitorCount, physicalMonitors))
+            if (!NativeMethods.GetVCPFeatureAndVCPFeatureReply(
+                pm.hPhysicalMonitor,
+                vcpCode,
+                out _,
+                out uint currentValue,
+                out uint maximumValue))
             {
-                try
-                {
-                    if (NativeMethods.GetVCPFeatureAndVCPFeatureReply(
-                        physicalMonitors[0].hPhysicalMonitor,
-                        vcpCode,
-                        out _,
-                        out uint currentValue,
-                        out uint maximumValue))
-                    {
-                        return (currentValue, maximumValue);
-                    }
-                }
-                finally
-                {
-                    foreach (var pm in physicalMonitors)
-                    {
-                        NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
-                    }
-                }
+                throw CreateWin32Exception($"Could not retrieve VCP feature 0x{vcpCode:X2}");
             }
-        }
 
-        throw new InvalidOperationException($"Could not retrieve VCP feature 0x{vcpCode:X2}");
+            return (currentValue, maximumValue);
+        });
     }
 
     /// <summary>
@@ -291,50 +274,88 @@ public class MonitorService : IMonitorService
     /// </summary>
     public void SetVcpFeature(byte vcpCode, uint value, int monitorIndex = 0, int maxRetries = 5)
     {
-        if (monitorIndex < 0 || monitorIndex >= _monitors.Count)
-            throw new ArgumentOutOfRangeException(nameof(monitorIndex), "Invalid monitor index");
+        ValidateMonitorIndex(monitorIndex);
 
-        IntPtr monitorHandle = GetMonitorHandle(monitorIndex);
-        if (monitorHandle == IntPtr.Zero)
-            throw new InvalidOperationException("Could not get monitor handle");
-
-        if (NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount) && monitorCount > 0)
+        WithPhysicalMonitor(monitorIndex, pm =>
         {
-            var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
-            if (NativeMethods.GetPhysicalMonitorsFromHMONITOR(monitorHandle, monitorCount, physicalMonitors))
+            // Retry logic - monitor might be busy/switching modes
+            int lastError = 0;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                try
+                if (NativeMethods.SetVCPFeature(pm.hPhysicalMonitor, vcpCode, value))
+                    return true;
+
+                lastError = Marshal.GetLastPInvokeError();
+
+                if (attempt < maxRetries)
                 {
-                    // Retry logic - monitor might be busy/switching modes
-                    bool success = false;
-                    for (int attempt = 1; attempt <= maxRetries; attempt++)
-                    {
-                        if (NativeMethods.SetVCPFeature(physicalMonitors[0].hPhysicalMonitor, vcpCode, value))
-                        {
-                            success = true;
-                            break;
-                        }
-                        
-                        if (attempt < maxRetries)
-                        {
-                            Thread.Sleep(1000); // Wait 1 second before retry
-                        }
-                    }
-                    
-                    if (!success)
-                    {
-                        throw new InvalidOperationException($"Failed to set VCP feature 0x{vcpCode:X2} after {maxRetries} attempts");
-                    }
-                }
-                finally
-                {
-                    foreach (var pm in physicalMonitors)
-                    {
-                        NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
-                    }
+                    Thread.Sleep(1000); // Wait 1 second before retry
                 }
             }
+
+            throw CreateWin32Exception(
+                $"Failed to set VCP feature 0x{vcpCode:X2} after {maxRetries} attempts", lastError);
+        });
+    }
+
+    private void ValidateMonitorIndex(int monitorIndex)
+    {
+        if (monitorIndex < 0 || monitorIndex >= _monitors.Count)
+            throw new ArgumentOutOfRangeException(nameof(monitorIndex), "Invalid monitor index");
+    }
+
+    /// <summary>
+    /// Resolves the physical monitor for a logical monitor index, runs <paramref name="action"/>
+    /// on it and always releases all physical monitor handles afterwards.
+    /// </summary>
+    private T WithPhysicalMonitor<T>(int monitorIndex, Func<NativeMethods.PhysicalMonitor, T> action)
+    {
+        IntPtr monitorHandle = GetMonitorHandle(monitorIndex);
+        if (monitorHandle == IntPtr.Zero)
+            throw new InvalidOperationException($"Could not get monitor handle for monitor {monitorIndex}");
+
+        return WithPhysicalMonitor(monitorHandle, action);
+    }
+
+    private static T WithPhysicalMonitor<T>(IntPtr monitorHandle, Func<NativeMethods.PhysicalMonitor, T> action)
+    {
+        if (!NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount))
+            throw CreateWin32Exception("Could not get number of physical monitors");
+
+        if (monitorCount == 0)
+            throw new InvalidOperationException("No physical monitor found for this display");
+
+        var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
+        if (!NativeMethods.GetPhysicalMonitorsFromHMONITOR(monitorHandle, monitorCount, physicalMonitors))
+            throw CreateWin32Exception("Could not get physical monitor handles");
+
+        try
+        {
+            return action(physicalMonitors[0]);
         }
+        finally
+        {
+            foreach (var pm in physicalMonitors)
+            {
+                NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates an exception that includes the Win32 error of the last failed P/Invoke call.
+    /// Must be called directly after the failing call.
+    /// </summary>
+    private static InvalidOperationException CreateWin32Exception(string message)
+        => CreateWin32Exception(message, Marshal.GetLastPInvokeError());
+
+    private static InvalidOperationException CreateWin32Exception(string message, int win32Error)
+    {
+        if (win32Error == 0)
+            return new InvalidOperationException(message);
+
+        var inner = new Win32Exception(win32Error);
+        return new InvalidOperationException($"{message} (Win32 error 0x{win32Error:X8}: {inner.Message})", inner);
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -366,9 +387,10 @@ public class MonitorService : IMonitorService
                 {
                     EnrichMonitorInfo(monitor, hMonitor);
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Continue even if enrichment fails
+                    Debug.WriteLine($"Could not enrich monitor {monitor.DeviceName}: {ex}");
                 }
 
                 _monitors.Add(monitor);
@@ -383,64 +405,57 @@ public class MonitorService : IMonitorService
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private void EnrichMonitorInfo(MonitorInfo monitor, IntPtr hMonitor)
     {
-        if (NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint monitorCount))
+        WithPhysicalMonitor(hMonitor, physicalMonitor =>
         {
-            if (monitorCount > 0)
+            // Set description from physical monitor
+            monitor.Description = physicalMonitor.szPhysicalMonitorDescription;
+
+            // Try to get WMI information
+            try
             {
-                var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
-                if (NativeMethods.GetPhysicalMonitorsFromHMONITOR(hMonitor, monitorCount, physicalMonitors))
+                EnrichFromWmi(monitor);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Could not read WMI data for {monitor.DeviceName}: {ex}");
+            }
+
+            // If Model is still empty, use description
+            if (string.IsNullOrEmpty(monitor.Model))
+                monitor.Model = monitor.Description;
+
+            // Try to get brightness
+            if (NativeMethods.GetMonitorBrightness(
+                physicalMonitor.hPhysicalMonitor,
+                out _,
+                out uint currentBrightness,
+                out _))
+            {
+                monitor.Brightness = (int)currentBrightness;
+            }
+            else
+            {
+                Debug.WriteLine($"Could not read brightness for {monitor.DeviceName}: Win32 error 0x{Marshal.GetLastPInvokeError():X8}");
+            }
+
+            // Try to get firmware version
+            try
+            {
+                var (fwValue, _) = GetVcpFeatureRaw(physicalMonitor.hPhysicalMonitor, (byte)VcpCode.Firmware);
+                if (fwValue != 0)
                 {
-                    var physicalMonitor = physicalMonitors[0];
-                    
-                    // Set description from physical monitor
-                    monitor.Description = physicalMonitor.szPhysicalMonitorDescription;
-                    
-                    // Try to get WMI information
-                    try
-                    {
-                        EnrichFromWmi(monitor);
-                    }
-                    catch { }
-                    
-                    // If Model is still empty, use description
-                    if (string.IsNullOrEmpty(monitor.Model))
-                        monitor.Model = monitor.Description;
-
-                    // Try to get brightness
-                    try
-                    {
-                        if (NativeMethods.GetMonitorBrightness(
-                            physicalMonitor.hPhysicalMonitor,
-                            out _,
-                            out uint currentBrightness,
-                            out _))
-                        {
-                            monitor.Brightness = (int)currentBrightness;
-                        }
-                    }
-                    catch { }
-                    
-                    // Try to get firmware version
-                    try
-                    {
-                        var (fwValue, _) = GetVcpFeatureRaw(physicalMonitor.hPhysicalMonitor, (byte)VcpCode.Firmware);
-                        if (fwValue != 0)
-                        {
-                            monitor.Firmware = $"{(fwValue & 0x7FF):x}";
-                        }
-                    }
-                    catch { }
-
-                    // Cleanup
-                    foreach (var pm in physicalMonitors)
-                    {
-                        NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
-                    }
+                    monitor.Firmware = $"{(fwValue & 0x7FF):x}";
                 }
             }
-        }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Could not read firmware version for {monitor.DeviceName}: {ex.Message}");
+            }
+
+            return true;
+        });
     }
-    
+
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private void EnrichFromWmi(MonitorInfo monitor)
     {
@@ -483,7 +498,10 @@ public class MonitorService : IMonitorService
                             monitor.WeekOfManufacture = week;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Could not read WeekOfManufacture: {ex.Message}");
+                }
                 
                 try
                 {
@@ -494,12 +512,18 @@ public class MonitorService : IMonitorService
                             monitor.YearOfManufacture = year;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Could not read YearOfManufacture: {ex.Message}");
+                }
                 
                 // Usually only one monitor match, but we take the first one
                 break;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Could not read WmiMonitorID entry: {ex.Message}");
+            }
         }
     }
     
@@ -512,74 +536,39 @@ public class MonitorService : IMonitorService
             out uint currentValue,
             out uint maxValue))
         {
-            throw new InvalidOperationException($"Could not retrieve VCP feature 0x{vcpCode:X2}");
+            throw CreateWin32Exception($"Could not retrieve VCP feature 0x{vcpCode:X2}");
         }
         return (currentValue, maxValue);
     }
 
     private int GetMonitorBrightness(MonitorInfo monitor)
     {
-        // Re-enumerate to get handle
-        IntPtr monitorHandle = GetMonitorHandle(monitor.Index);
-        if (monitorHandle == IntPtr.Zero)
-            throw new InvalidOperationException("Could not get monitor handle");
-
-        if (NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount) && monitorCount > 0)
+        return WithPhysicalMonitor(monitor.Index, pm =>
         {
-            var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
-            if (NativeMethods.GetPhysicalMonitorsFromHMONITOR(monitorHandle, monitorCount, physicalMonitors))
+            if (!NativeMethods.GetMonitorBrightness(
+                pm.hPhysicalMonitor,
+                out _,
+                out uint currentBrightness,
+                out _))
             {
-                try
-                {
-                    if (NativeMethods.GetMonitorBrightness(
-                        physicalMonitors[0].hPhysicalMonitor,
-                        out _,
-                        out uint currentBrightness,
-                        out _))
-                    {
-                        return (int)currentBrightness;
-                    }
-                }
-                finally
-                {
-                    foreach (var pm in physicalMonitors)
-                    {
-                        NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
-                    }
-                }
+                throw CreateWin32Exception("Could not retrieve monitor brightness");
             }
-        }
 
-        throw new InvalidOperationException("Could not retrieve monitor brightness");
+            return (int)currentBrightness;
+        });
     }
 
     private void SetMonitorBrightness(MonitorInfo monitor, int brightness)
     {
-        IntPtr monitorHandle = GetMonitorHandle(monitor.Index);
-        if (monitorHandle == IntPtr.Zero)
-            throw new InvalidOperationException("Could not get monitor handle");
-
-        if (NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount) && monitorCount > 0)
+        WithPhysicalMonitor(monitor.Index, pm =>
         {
-            var physicalMonitors = new NativeMethods.PhysicalMonitor[monitorCount];
-            if (NativeMethods.GetPhysicalMonitorsFromHMONITOR(monitorHandle, monitorCount, physicalMonitors))
+            if (!NativeMethods.SetMonitorBrightness(pm.hPhysicalMonitor, (uint)brightness))
             {
-                try
-                {
-                    if (!NativeMethods.SetMonitorBrightness(physicalMonitors[0].hPhysicalMonitor, (uint)brightness))
-                    {
-                        throw new InvalidOperationException("Failed to set monitor brightness");
-                    }
-                }
-                finally
-                {
-                    foreach (var pm in physicalMonitors)
-                    {
-                        NativeMethods.DestroyPhysicalMonitor(pm.hPhysicalMonitor);
-                    }
-                }
+                throw CreateWin32Exception("Failed to set monitor brightness");
             }
-        }
+
+            return true;
+        });
     }
 
     private IntPtr GetMonitorHandle(int index)

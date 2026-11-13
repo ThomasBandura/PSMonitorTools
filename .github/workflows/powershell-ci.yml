@@ -11,40 +11,47 @@ on:
     paths:
       - 'PowerShell/**'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: windows-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v7
+
     - name: Install Pester
       shell: pwsh
       run: |
-        Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
-        
+        # -SkipPublisherCheck is required on Windows runners because the inbox Pester 3.x has a different publisher.
+        Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck
+
     - name: Run Pester Tests (Unit Tests Only)
       shell: pwsh
       run: |
+        Import-Module Pester -RequiredVersion 5.7.1
         $config = New-PesterConfiguration
         $config.Run.Path = "PowerShell/Tests/Monitor.Tests.ps1"
         $config.Output.Verbosity = "Detailed"
         $config.CodeCoverage.Enabled = $true
-        $config.CodeCoverage.Path = "PowerShell/PSMonitorTools/*.ps1"
+        $config.CodeCoverage.Path = "PowerShell/PSMonitorTools/*.ps*1"
         Invoke-Pester -Configuration $config
-        
+
   build:
     runs-on: windows-latest
     needs: test
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v7
+
     - name: Build Module
       shell: pwsh
       run: |
-        ./PowerShell/Build/build.ps1 -Version "1.0.${{ github.run_number }}"
-        
+        $manifestVersion = [version](Import-PowerShellDataFile ./PowerShell/PSMonitorTools/PSMonitorTools.psd1).ModuleVersion
+        $version = "$($manifestVersion.Major).$($manifestVersion.Minor).$env:GITHUB_RUN_NUMBER"
+        ./PowerShell/Build/build.ps1 -Version $version
+
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:

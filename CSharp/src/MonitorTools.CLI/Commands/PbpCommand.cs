@@ -11,19 +11,21 @@ public static class PbpCommand
         var pbpCommand = new Command("pbp", "Manage PBP (Picture-by-Picture) mode");
 
         var statusCommand = new Command("status", "Get PBP status");
-        statusCommand.SetHandler(() =>
+        var statusMonitorOption = CreateMonitorOption();
+        statusCommand.AddOption(statusMonitorOption);
+        statusCommand.SetHandler((int monitorIndex) =>
         {
-            var service = new MonitorService();
             try
             {
-                var isEnabled = service.IsPbpEnabled();
+                var service = new MonitorService();
+                var isEnabled = service.IsPbpEnabled(monitorIndex);
                 Console.WriteLine($"PBP Mode: {(isEnabled ? "Enabled" : "Disabled")}");
 
                 if (isEnabled)
                 {
                     try
                     {
-                        var rightInput = service.GetPbpRightInput();
+                        var rightInput = service.GetPbpRightInput(monitorIndex);
                         Console.WriteLine($"Right Input: {rightInput}");
                     }
                     catch
@@ -34,98 +36,92 @@ public static class PbpCommand
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        });
+        }, statusMonitorOption);
 
         var enableCommand = new Command("enable", "Enable PBP mode");
-        enableCommand.SetHandler(() =>
+        var enableMonitorOption = CreateMonitorOption();
+        enableCommand.AddOption(enableMonitorOption);
+        enableCommand.SetHandler((int monitorIndex) =>
         {
-            var service = new MonitorService();
             try
             {
-                service.EnablePbp();
-                Console.WriteLine("PBP mode enabled");
+                var service = new MonitorService();
+                service.EnablePbp(monitorIndex);
+                Console.WriteLine($"Monitor {monitorIndex} PBP mode enabled");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        });
+        }, enableMonitorOption);
 
         var disableCommand = new Command("disable", "Disable PBP mode");
-        disableCommand.SetHandler(() =>
+        var disableMonitorOption = CreateMonitorOption();
+        disableCommand.AddOption(disableMonitorOption);
+        disableCommand.SetHandler((int monitorIndex) =>
         {
-            var service = new MonitorService();
             try
             {
-                service.DisablePbp();
-                Console.WriteLine("PBP mode disabled");
+                var service = new MonitorService();
+                service.DisablePbp(monitorIndex);
+                Console.WriteLine($"Monitor {monitorIndex} PBP mode disabled");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        });
+        }, disableMonitorOption);
 
         var setLeftCommand = new Command("set-left", "Set left input source for PBP");
-        var leftInputArg = new Argument<string>(
-            name: "input",
-            description: "Input source (Hdmi1, Hdmi2, DisplayPort, UsbC)");
+        var leftInputArg = CreateInputArgument();
+        var leftMonitorOption = CreateMonitorOption();
         setLeftCommand.AddArgument(leftInputArg);
-        setLeftCommand.SetHandler((string input) =>
+        setLeftCommand.AddOption(leftMonitorOption);
+        setLeftCommand.SetHandler((string input, int monitorIndex) =>
         {
-            var service = new MonitorService();
             try
             {
-                if (!Enum.TryParse<MonitorInput>(input, true, out var inputEnum))
-                {
-                    Console.WriteLine($"Invalid input source: {input}");
-                    Console.WriteLine("Valid values: Hdmi1, Hdmi2, DisplayPort, UsbC");
-                    Environment.Exit(1);
+                if (!TryParseInput(input, out var inputEnum))
                     return;
-                }
 
-                service.SetInput(inputEnum);
-                Console.WriteLine($"PBP left input set to {inputEnum}");
+                var service = new MonitorService();
+                service.SetInput(inputEnum, monitorIndex);
+                Console.WriteLine($"Monitor {monitorIndex} PBP left input set to {inputEnum}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        }, leftInputArg);
+        }, leftInputArg, leftMonitorOption);
 
         var setRightCommand = new Command("set-right", "Set right input source for PBP");
-        var rightInputArg = new Argument<string>(
-            name: "input",
-            description: "Input source (Hdmi1, Hdmi2, DisplayPort, UsbC)");
+        var rightInputArg = CreateInputArgument();
+        var rightMonitorOption = CreateMonitorOption();
         setRightCommand.AddArgument(rightInputArg);
-        setRightCommand.SetHandler((string input) =>
+        setRightCommand.AddOption(rightMonitorOption);
+        setRightCommand.SetHandler((string input, int monitorIndex) =>
         {
-            var service = new MonitorService();
             try
             {
-                if (!Enum.TryParse<MonitorInput>(input, true, out var inputEnum))
-                {
-                    Console.WriteLine($"Invalid input source: {input}");
-                    Console.WriteLine("Valid values: Hdmi1, Hdmi2, DisplayPort, UsbC");
-                    Environment.Exit(1);
+                if (!TryParseInput(input, out var inputEnum))
                     return;
-                }
 
-                service.SetPbpRightInput(inputEnum);
-                Console.WriteLine($"PBP right input set to {inputEnum}");
+                var service = new MonitorService();
+                service.SetPbpRightInput(inputEnum, monitorIndex);
+                Console.WriteLine($"Monitor {monitorIndex} PBP right input set to {inputEnum}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        }, rightInputArg);
+        }, rightInputArg, rightMonitorOption);
 
         pbpCommand.AddCommand(statusCommand);
         pbpCommand.AddCommand(enableCommand);
@@ -134,5 +130,25 @@ public static class PbpCommand
         pbpCommand.AddCommand(setRightCommand);
 
         return pbpCommand;
+    }
+
+    private static Option<int> CreateMonitorOption() => new(
+        aliases: new[] { "--monitor", "-m" },
+        getDefaultValue: () => 0,
+        description: "Monitor index (0-based, default: 0)");
+
+    private static Argument<string> CreateInputArgument() => new(
+        name: "input",
+        description: "Input source (Hdmi1, Hdmi2, DisplayPort, UsbC)");
+
+    private static bool TryParseInput(string input, out MonitorInput inputEnum)
+    {
+        if (Enum.TryParse(input, true, out inputEnum))
+            return true;
+
+        Console.Error.WriteLine($"Invalid input source: {input}");
+        Console.Error.WriteLine("Valid values: Hdmi1, Hdmi2, DisplayPort, UsbC");
+        Environment.Exit(1);
+        return false;
     }
 }

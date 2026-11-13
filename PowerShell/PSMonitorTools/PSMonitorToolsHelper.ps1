@@ -5,6 +5,9 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
+// Resolve native libraries only from System32 to prevent DLL hijacking.
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
 public struct PhysicalMonitor {
     public IntPtr Handle;

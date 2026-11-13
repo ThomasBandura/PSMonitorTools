@@ -1,5 +1,9 @@
 using System.Runtime.InteropServices;
 
+// Resolve native libraries (dxva2.dll, user32.dll) only from System32 to prevent
+// DLL hijacking via the application directory.
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 namespace MonitorTools.Core;
 
 /// <summary>
@@ -46,17 +50,6 @@ internal static class NativeMethods
         IntPtr hMonitor,
         byte bVCPCode,
         uint dwNewValue);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    public static extern bool GetCapabilitiesStringLength(
-        IntPtr hMonitor,
-        out uint pdwCapabilitiesStringLengthInCharacters);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    public static extern bool CapabilitiesRequestAndCapabilitiesReply(
-        IntPtr hMonitor,
-        System.Text.StringBuilder pszASCIICapabilitiesString,
-        uint dwCapabilitiesStringLengthInCharacters);
 
     [DllImport("user32.dll")]
     public static extern bool EnumDisplayMonitors(
@@ -106,6 +99,5 @@ internal static class NativeMethods
         public string szPhysicalMonitorDescription;
     }
 
-    public const int MONITOR_DEFAULTTOPRIMARY = 0x00000001;
     public const int MONITORINFOF_PRIMARY = 0x00000001;
 }
