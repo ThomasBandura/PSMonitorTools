@@ -5,6 +5,30 @@ All notable changes to PSMonitorTools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-11-13
+
+### Fixed
+- CI/Release: use .NET SDK from `global.json` instead of .NET 8 (#2).
+- C#: `SetVcpFeature`/`SetBrightness` now fail instead of silently reporting success (#4).
+- CLI: all `pbp` subcommands accept `--monitor`/`-m` (#5) and write errors to stderr (#12).
+- PowerShell: wildcard characters in `-MonitorName` and quotes in tab completion are escaped (#11).
+- C#: physical monitor handles are always released; errors include the Win32 error code (#28, #29).
+
+### Security
+- `dxva2.dll`/`user32.dll` are only loaded from System32 (#16).
+- Workflows: least-privilege token permissions, updated actions, third-party actions pinned by SHA (#17).
+- Release workflow validates the tag version and no longer interpolates it into scripts (#18).
+- Pester pinned to 5.7.1 in CI (#20).
+
+### Changed
+- C# hardware tests only run with `MONITORTOOLS_HARDWARE_TESTS=1` (#24).
+- Code coverage includes `PSMonitorTools.psm1` (#26).
+- Build script reads the version from the module manifest; docs updated to .NET 10 (#14).
+- Module manifest declares `PowerShellVersion`, `Copyright` and gallery metadata (#32).
+
+### Removed
+- Unused internal `Wait-MonitorInput` function (#13) and unused P/Invoke declarations (#28).
+
 ## [0.9.0] - 2026-06-09
 
 ### Changed
