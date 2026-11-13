@@ -101,10 +101,12 @@ Describe 'Monitor module' {
             { Switch-MonitorInput -MonitorName 'dell' } | Should -Throw
         }
 
-        It 'returns false cleanly if no monitor matches' {
+        It 'returns false and writes an error if no monitor matches' {
             # Integration test: 'GhostMonitorXYZ' should not exist
-            $result = Switch-MonitorInput -MonitorName 'GhostMonitorXYZ' -InputLeft Hdmi1 -Verbose
+            $result = Switch-MonitorInput -MonitorName 'GhostMonitorXYZ' -InputLeft Hdmi1 -ErrorAction SilentlyContinue -ErrorVariable err
             $result | Should -BeFalse
+            $err | Should -Not -BeNullOrEmpty
+            "$($err[0])" | Should -Match 'No monitor found'
         }
 
         It 'fails validation for invalid InputSource' {
@@ -125,10 +127,11 @@ Describe 'Monitor module' {
             { & $Function -MonitorName 'dell' -WhatIf } | Should -Not -Throw
         }
 
-        It '<Function> returns false cleanly if no monitor matches' -TestCases $pbpFunctions {
+        It '<Function> returns false and writes an error if no monitor matches' -TestCases $pbpFunctions {
             param($Function)
-            $result = & $Function -MonitorName 'GhostMonitorXYZ' -Verbose
+            $result = & $Function -MonitorName 'GhostMonitorXYZ' -ErrorAction SilentlyContinue -ErrorVariable err
             $result | Should -BeFalse
+            $err | Should -Not -BeNullOrEmpty
         }
     }
 
@@ -215,10 +218,11 @@ Describe 'Monitor module' {
             { & $SetFunc -MonitorName "Test" -$Param ($Min - 1) } | Should -Throw
         }
 
-        It '<SetFunc> handles non-existent monitor gracefully' -TestCases $setFunctions {
+        It '<SetFunc> returns false and writes an error for a non-existent monitor' -TestCases $setFunctions {
             param($SetFunc, $Param)
             $params = @{ MonitorName = "DefinitelyNotAMonitor"; $Param = 50 }
-            & $SetFunc @params | Should -BeFalse
+            & $SetFunc @params -ErrorAction SilentlyContinue -ErrorVariable err | Should -BeFalse
+            $err | Should -Not -BeNullOrEmpty
         }
 
         It 'Get-MonitorAudio is exported' {
@@ -240,9 +244,10 @@ Describe 'Monitor module' {
             { & $Function -MonitorName "NonExistent" -WhatIf } | Should -Not -Throw
         }
 
-        It '<Function> handles non-existent monitor gracefully' -TestCases $audioToggleFunctions {
+        It '<Function> returns false and writes an error for a non-existent monitor' -TestCases $audioToggleFunctions {
             param($Function)
-            & $Function -MonitorName "DefinitelyNotAMonitor" | Should -BeFalse
+            & $Function -MonitorName "DefinitelyNotAMonitor" -ErrorAction SilentlyContinue -ErrorVariable err | Should -BeFalse
+            $err | Should -Not -BeNullOrEmpty
         }
     }
 
@@ -250,7 +255,99 @@ Describe 'Monitor module' {
 
     Context 'Internals' {
         It 'Helper type is compiled and available' {
-            ([System.Management.Automation.PSTypeName]'PSMonitorToolsHelper').Type | Should -Not -BeNullOrEmpty
+            ([System.Management.Automation.PSTypeName]'PSMonitorTools.Native.MonitorHelper').Type | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Helper types do not pollute the global namespace' {
+            ([System.Management.Automation.PSTypeName]'PSMonitorToolsHelper').Type | Should -BeNullOrEmpty
+            ([System.Management.Automation.PSTypeName]'PhysicalMonitor').Type | Should -BeNullOrEmpty
+        }
+
+        It 'internal helper Invoke-PhysicalMonitorAction is not exported' {
+            Get-Command Invoke-PhysicalMonitorAction -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Monitor module logic (mocked hardware)' {
+    BeforeAll {
+        $modulePath = Join-Path $PSScriptRoot '..\PSMonitorTools\PSMonitorTools.psd1'
+        Import-Module $modulePath -Force
+    }
+
+    Context 'Switch-MonitorInput verification' {
+        BeforeEach {
+            InModuleScope PSMonitorTools {
+                Mock Start-Sleep {}
+                Mock Invoke-PhysicalMonitorAction {
+                    & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Fake Monitor' }) $null 0
+                }
+                Mock Invoke-VcpSet { $true }
+                # PBP off
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+            }
+        }
+
+        It 'returns true with a warning when the monitor stops answering after the switch' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { $null }
+
+                $result = Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false `
+                    -WarningVariable warn -WarningAction SilentlyContinue -ErrorVariable err -ErrorAction SilentlyContinue
+
+                $result | Should -BeTrue
+                "$warn" | Should -Match 'no longer answers DDC/CI'
+                $err | Should -BeNullOrEmpty
+            }
+        }
+
+        It 'verifies only once (Invoke-VcpSet is called with -SkipVerification)' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF11 }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false | Should -BeTrue
+
+                Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $SkipVerification }
+            }
+        }
+
+        It 'returns false with an error when the monitor reports a different input' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0x0F }
+
+                $result = Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false `
+                    -ErrorVariable err -ErrorAction SilentlyContinue
+
+                $result | Should -BeFalse
+                "$err" | Should -Match 'expected 0x11, got 0x0F'
+            }
+        }
+    }
+
+    Context 'Set results across multiple monitors' {
+        It 'returns false if one of several monitors fails' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-PhysicalMonitorAction {
+                    & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Monitor A' }) $null 0
+                    & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Monitor B' }) $null 1
+                }
+                Mock Invoke-VcpSet -ParameterFilter { $MonitorDescription -eq 'Monitor A' } { $true }
+                Mock Invoke-VcpSet -ParameterFilter { $MonitorDescription -eq 'Monitor B' } { $false }
+
+                Set-MonitorBrightness -MonitorName 'Monitor' -Brightness 50 -Confirm:$false | Should -BeFalse
+            }
+        }
+
+        It 'returns true if all monitors succeed' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-PhysicalMonitorAction {
+                    & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Monitor A' }) $null 0
+                    & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Monitor B' }) $null 1
+                }
+                Mock Invoke-VcpSet { $true }
+
+                Set-MonitorBrightness -MonitorName 'Monitor' -Brightness 50 -Confirm:$false | Should -BeTrue
+            }
         }
     }
 }

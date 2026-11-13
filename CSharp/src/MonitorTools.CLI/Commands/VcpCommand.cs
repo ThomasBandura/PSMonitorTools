@@ -60,14 +60,28 @@ public static class VcpCommand
             aliases: new[] { "--monitor", "-m" },
             getDefaultValue: () => 0,
             description: "Monitor index (0-based, default: 0)");
+        var forceOption = new Option<bool>(
+            aliases: new[] { "--force", "-f" },
+            description: "Required for critical codes that reset settings or change the power state (0x04, 0x05, 0x06, 0x08, 0x0A, 0xB0, 0xD6)");
         setCommand.AddArgument(setCodeArgument);
         setCommand.AddArgument(valueArgument);
         setCommand.AddOption(setMonitorOption);
-        setCommand.SetHandler((codeStr, value, monitorIndex) =>
+        setCommand.AddOption(forceOption);
+        setCommand.SetHandler((codeStr, value, monitorIndex, force) =>
         {
             try
             {
                 byte code = ParseVcpCode(codeStr);
+
+                if (VcpCode.IsCritical(code) && !force)
+                {
+                    Console.Error.WriteLine(
+                        $"Error: VCP 0x{code:X2} ({VcpCode.CriticalCodes[code]}) can reset monitor settings or change its power state.");
+                    Console.Error.WriteLine("Use --force to write it anyway.");
+                    Environment.Exit(1);
+                    return;
+                }
+
                 var service = new MonitorService();
                 service.SetVcpFeature(code, value, monitorIndex);
                 
@@ -83,7 +97,7 @@ public static class VcpCommand
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.Exit(1);
             }
-        }, setCodeArgument, valueArgument, setMonitorOption);
+        }, setCodeArgument, valueArgument, setMonitorOption, forceOption);
 
         command.AddCommand(getCommand);
         command.AddCommand(setCommand);
