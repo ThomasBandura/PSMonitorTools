@@ -171,11 +171,17 @@ MonitorTools input set Hdmi1
 MonitorTools input set Hdmi2 -m 0
 MonitorTools input set DisplayPort
 MonitorTools input set UsbC
+
+# Linken und/oder rechten Eingang (PBP) umschalten
+MonitorTools input switch --left Hdmi1
+MonitorTools input switch --right UsbC
+MonitorTools input switch --left UsbC --right Hdmi1 -m 0
 ```
 
 **Unterbefehle:**
 - `get`: Zeigt die aktuelle Eingabequelle
 - `set <source>`: Setzt die Eingabequelle
+- `switch [--left <source>] [--right <source>]`: Setzt den linken und/oder rechten Eingang. Bei aktivem PBP wird die Reihenfolge automatisch so gewählt, dass links und rechts nie gleichzeitig denselben Eingang verwenden (z. B. beim Tauschen der Seiten). Links und rechts dürfen bei aktivem PBP nicht gleich sein.
 
 **Verfügbare Eingabequellen:**
 - `Hdmi1` (0x11)
@@ -251,6 +257,23 @@ MonitorTools vcp set 0xE9 0x24 -m 0
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
+- `--force, -f`: Erforderlich für kritische Codes (siehe unten)
+
+**Kritische VCP-Codes:** Die folgenden Codes setzen Einstellungen zurück oder ändern den Energiezustand des Monitors. `vcp set` schreibt sie nur mit `--force`:
+
+| Code | Bedeutung |
+|------|-----------|
+| `0x04` | Werkseinstellungen wiederherstellen |
+| `0x05` | Helligkeit/Kontrast zurücksetzen |
+| `0x06` | Geometrie zurücksetzen |
+| `0x08` | Farbeinstellungen zurücksetzen |
+| `0x0A` | TV-Einstellungen zurücksetzen |
+| `0xB0` | Einstellungen speichern/wiederherstellen |
+| `0xD6` | Energiemodus (kann den Monitor ausschalten) |
+
+```cmd
+MonitorTools vcp set 0xD6 1 --force
+```
 
 **Häufige VCP-Codes:**
 - `0x10`: Helligkeit

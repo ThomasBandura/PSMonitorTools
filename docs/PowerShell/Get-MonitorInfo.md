@@ -19,6 +19,8 @@ Import-Module .\PSMonitorTools\PSMonitorTools.psd1
 
 ## Verfügbare Cmdlets
 
+**Fehlerverhalten der Set-/Switch-Cmdlets:** Passt kein Monitor zu `-MonitorName`, schreiben die Cmdlets einen Fehler und geben `$false` zurück. Passen mehrere Monitore, ist das Ergebnis nur dann `$true`, wenn die Änderung auf allen erfolgreich war.
+
 ### Monitor-Informationen
 
 #### Get-MonitorInfo

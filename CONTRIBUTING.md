@@ -97,10 +97,18 @@ dotnet build CSharp/MonitorTools.sln
 dotnet test CSharp/MonitorTools.sln
 
 # Run hardware tests too (switches real monitor inputs/PBP!)
-# PowerShell: $env:MONITORTOOLS_HARDWARE_TESTS = "1"; dotnet test CSharp/MonitorTools.sln
+dotnet test CSharp/MonitorTools.sln -s CSharp/tests/hardware.runsettings
 
 # Run CLI
 dotnet run --project CSharp/src/MonitorTools.CLI
+```
+
+To run the hardware tests from the VS Code Test Explorer (C# Dev Kit), add this to your
+**user** settings (not the shared `.vscode/settings.json`, otherwise they run for everyone)
+and reload the window:
+
+```json
+"dotnet.unitTests.runSettingsPath": "<repo>/CSharp/tests/hardware.runsettings"
 ```
 
 ## Code Style

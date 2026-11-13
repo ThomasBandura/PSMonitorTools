@@ -63,6 +63,13 @@ internal static class NativeMethods
         IntPtr hMonitor,
         ref MonitorInfoEx lpmi);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool EnumDisplayDevices(
+        string? lpDevice,
+        uint iDevNum,
+        ref DisplayDevice lpDisplayDevice,
+        uint dwFlags);
+
     public delegate bool MonitorEnumProc(
         IntPtr hMonitor,
         IntPtr hdcMonitor,
@@ -99,5 +106,26 @@ internal static class NativeMethods
         public string szPhysicalMonitorDescription;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DisplayDevice
+    {
+        public int cb;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+
+        public int StateFlags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+    }
+
     public const int MONITORINFOF_PRIMARY = 0x00000001;
+    public const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
 }

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Enables the hardware integration tests (MonitorTools.IntegrationTests).
+  WARNING: these tests switch inputs and PBP on the connected monitor.
+
+  Command line:
+    dotnet test CSharp/MonitorTools.sln -s CSharp/tests/hardware.runsettings
+
+  VS Code (C# Dev Kit), in your *user* settings (not the shared .vscode/settings.json):
+    "dotnet.unitTests.runSettingsPath": "<repo>/CSharp/tests/hardware.runsettings"
+-->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <MONITORTOOLS_HARDWARE_TESTS>1</MONITORTOOLS_HARDWARE_TESTS>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

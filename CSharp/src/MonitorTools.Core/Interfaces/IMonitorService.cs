@@ -87,6 +87,46 @@ public interface IMonitorService
     void SetInput(MonitorInput input, int monitorIndex = 0);
 
     /// <summary>
+    /// Sets the left and/or right input. When PBP is active, the switching order is chosen
+    /// so that left and right never use the same input at the same time.
+    /// </summary>
+    /// <param name="leftInput">Left/primary input, or null to keep the current one</param>
+    /// <param name="rightInput">Right (PBP) input, or null to keep the current one</param>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    void SetInputSmart(MonitorInput? leftInput = null, MonitorInput? rightInput = null, int monitorIndex = 0);
+
+    /// <summary>
+    /// Checks if PBP (Picture-by-Picture) mode is enabled
+    /// </summary>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    bool IsPbpEnabled(int monitorIndex = 0);
+
+    /// <summary>
+    /// Enables PBP (Picture-by-Picture) mode
+    /// </summary>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    void EnablePbp(int monitorIndex = 0);
+
+    /// <summary>
+    /// Disables PBP (Picture-by-Picture) mode
+    /// </summary>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    void DisablePbp(int monitorIndex = 0);
+
+    /// <summary>
+    /// Gets the right input source when PBP is enabled
+    /// </summary>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    MonitorInput GetPbpRightInput(int monitorIndex = 0);
+
+    /// <summary>
+    /// Sets the right input source for PBP mode
+    /// </summary>
+    /// <param name="input">Input source for the right side</param>
+    /// <param name="monitorIndex">Monitor index (0-based)</param>
+    void SetPbpRightInput(MonitorInput input, int monitorIndex = 0);
+
+    /// <summary>
     /// Gets a VCP feature value
     /// </summary>
     /// <param name="vcpCode">VCP feature code</param>

@@ -44,6 +44,26 @@ public static class VcpCode
     /// PBP/PIP Mode (0xE9)
     /// </summary>
     public const byte PbpMode = 0xE9;
+
+    /// <summary>
+    /// VCP codes that reset settings or change the power state. Writing them can have
+    /// effects that are hard to undo, so the CLI requires an explicit confirmation.
+    /// </summary>
+    public static IReadOnlyDictionary<byte, string> CriticalCodes { get; } = new Dictionary<byte, string>
+    {
+        [0x04] = "Restore factory defaults",
+        [0x05] = "Restore factory brightness/contrast defaults",
+        [0x06] = "Restore factory geometry defaults",
+        [0x08] = "Restore factory color defaults",
+        [0x0A] = "Restore factory TV defaults",
+        [0xB0] = "Settings store/restore",
+        [0xD6] = "Power mode"
+    };
+
+    /// <summary>
+    /// Returns true if writing the given VCP code can reset settings or change the power state
+    /// </summary>
+    public static bool IsCritical(byte vcpCode) => CriticalCodes.ContainsKey(vcpCode);
 }
 
 /// <summary>

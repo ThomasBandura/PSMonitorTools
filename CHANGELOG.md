@@ -5,6 +5,28 @@ All notable changes to PSMonitorTools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-11-13
+
+### Breaking Changes
+- PowerShell: Set/Switch cmdlets write an error when no monitor matches `-MonitorName` and return `$true` only if all matching monitors succeeded (#10).
+- PowerShell: native helper types moved to the namespace `PSMonitorTools.Native` (`[PSMonitorToolsHelper]` is now `[PSMonitorTools.Native.MonitorHelper]`) (#31).
+- CLI: `vcp set` requires `--force` for codes that reset settings or change the power state (0x04, 0x05, 0x06, 0x08, 0x0A, 0xB0, 0xD6) (#19).
+
+### Added
+- CLI: `input switch --left/--right` switches inputs with PBP collision handling (#23).
+- C#: `SetInputSmart` and the PBP methods are part of `IMonitorService` (#23).
+
+### Fixed
+- C#: manufacturer, model and serial number are assigned per monitor instead of using the first WMI entry for all (#3).
+- PowerShell: `Switch-MonitorInput` verifies each step once (no second verification loop) and reports a missing DDC/CI response after switching away as a warning (#9).
+- PowerShell: transient DDC/CI read failures are retried (up to 3 attempts), e.g. right after an input or PBP change.
+- C#: monitor handles are looked up per call, so a long-lived `MonitorService` keeps working after PBP changes re-enumerate the display.
+
+### Changed
+- C#: WMI, brightness and firmware data are loaded lazily, only for `get-info` (#22).
+- PowerShell: module cleanup, `ForEach-PhysicalMonitor` renamed to `Invoke-PhysicalMonitorAction`, exports in one place (#33).
+- Versions aligned to `1.0.0`; the C# version is defined once in `CSharp/Directory.Build.props`.
+
 ## [0.9.1] - 2026-11-13
 
 ### Fixed

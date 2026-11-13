@@ -1,6 +1,6 @@
 @{
     RootModule = 'PSMonitorTools.psm1'
-    ModuleVersion = '0.9.1'
+    ModuleVersion = '1.0.0'
     GUID = '07d96b06-cac4-48db-8cc1-8d50e11a8227'
     Author = 'Thomas Bandura'
     CompanyName = ''

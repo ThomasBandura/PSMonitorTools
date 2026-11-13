@@ -13,17 +13,24 @@ namespace MonitorTools.Core;
 public class MonitorService : IMonitorService
 {
     private readonly List<MonitorInfo> _monitors = new();
+    private bool _detailsLoaded;
 
+    /// <summary>
+    /// Enumerates the connected monitors. Only basic data (index, device name, resolution)
+    /// is read here; details such as WMI data, brightness and firmware are loaded on the
+    /// first call to <see cref="GetMonitors"/>.
+    /// </summary>
     public MonitorService()
     {
         EnumerateMonitors();
     }
 
     /// <summary>
-    /// Gets information about all connected monitors
+    /// Gets information about all connected monitors, including WMI data, brightness and firmware
     /// </summary>
     public MonitorInfo[] GetMonitors()
     {
+        EnsureDetailsLoaded();
         return _monitors.ToArray();
     }
 
@@ -362,6 +369,7 @@ public class MonitorService : IMonitorService
     private void EnumerateMonitors()
     {
         _monitors.Clear();
+        _detailsLoaded = false;
         int index = 0;
 
         NativeMethods.MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData) =>
@@ -373,27 +381,14 @@ public class MonitorService : IMonitorService
 
             if (NativeMethods.GetMonitorInfo(hMonitor, ref monitorInfo))
             {
-                var monitor = new MonitorInfo
+                _monitors.Add(new MonitorInfo
                 {
                     Index = index++,
                     DeviceName = monitorInfo.szDevice,
                     Width = monitorInfo.rcMonitor.Right - monitorInfo.rcMonitor.Left,
                     Height = monitorInfo.rcMonitor.Bottom - monitorInfo.rcMonitor.Top,
                     IsPrimary = (monitorInfo.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0
-                };
-
-                // Try to get additional information
-                try
-                {
-                    EnrichMonitorInfo(monitor, hMonitor);
-                }
-                catch (Exception ex)
-                {
-                    // Continue even if enrichment fails
-                    Debug.WriteLine($"Could not enrich monitor {monitor.DeviceName}: {ex}");
-                }
-
-                _monitors.Add(monitor);
+                });
             }
 
             return true;
@@ -403,22 +398,61 @@ public class MonitorService : IMonitorService
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private void EnrichMonitorInfo(MonitorInfo monitor, IntPtr hMonitor)
+    private void EnsureDetailsLoaded()
     {
+        if (_detailsLoaded)
+            return;
+
+        List<WmiMonitorData> wmiMonitors;
+        try
+        {
+            wmiMonitors = ReadWmiMonitors();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Could not read WMI monitor data: {ex}");
+            wmiMonitors = new List<WmiMonitorData>();
+        }
+
+        for (int i = 0; i < _monitors.Count; i++)
+        {
+            try
+            {
+                var hMonitor = GetMonitorHandle(i);
+                if (hMonitor == IntPtr.Zero)
+                    throw new InvalidOperationException("Monitor handle not found");
+
+                EnrichMonitorInfo(_monitors[i], hMonitor, wmiMonitors);
+            }
+            catch (Exception ex)
+            {
+                // Continue even if enrichment fails
+                Debug.WriteLine($"Could not enrich monitor {_monitors[i].DeviceName}: {ex}");
+            }
+        }
+
+        _detailsLoaded = true;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private void EnrichMonitorInfo(MonitorInfo monitor, IntPtr hMonitor, List<WmiMonitorData> wmiMonitors)
+    {
+        // Assign the WMI entry belonging to this display (by device instance path)
+        var wmi = FindWmiMonitor(monitor.DeviceName, wmiMonitors);
+        if (wmi != null)
+        {
+            wmiMonitors.Remove(wmi);
+            monitor.Manufacturer = wmi.Manufacturer;
+            monitor.SerialNumber = wmi.SerialNumber;
+            monitor.Model = wmi.Model;
+            monitor.WeekOfManufacture = wmi.WeekOfManufacture;
+            monitor.YearOfManufacture = wmi.YearOfManufacture;
+        }
+
         WithPhysicalMonitor(hMonitor, physicalMonitor =>
         {
             // Set description from physical monitor
             monitor.Description = physicalMonitor.szPhysicalMonitorDescription;
-
-            // Try to get WMI information
-            try
-            {
-                EnrichFromWmi(monitor);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Could not read WMI data for {monitor.DeviceName}: {ex}");
-            }
 
             // If Model is still empty, use description
             if (string.IsNullOrEmpty(monitor.Model))
@@ -456,77 +490,104 @@ public class MonitorService : IMonitorService
         });
     }
 
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private void EnrichFromWmi(MonitorInfo monitor)
+    /// <summary>
+    /// Finds the WmiMonitorID entry for a display device (e.g. \\.\DISPLAY1).
+    /// The device interface path (\\?\DISPLAY#HwId#InstanceId#{Guid}) is mapped to the
+    /// WMI instance name DISPLAY\HwId\InstanceId (optionally with the suffix _0).
+    /// </summary>
+    private static WmiMonitorData? FindWmiMonitor(string deviceName, List<WmiMonitorData> wmiMonitors)
     {
+        var instanceName = GetWmiInstanceName(deviceName);
+        if (instanceName == null)
+        {
+            Debug.WriteLine($"Could not determine device path for {deviceName}");
+            return null;
+        }
+
+        return wmiMonitors.FirstOrDefault(w => string.Equals(w.InstanceName, instanceName, StringComparison.OrdinalIgnoreCase))
+            ?? wmiMonitors.FirstOrDefault(w => string.Equals(w.InstanceName, instanceName + "_0", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? GetWmiInstanceName(string deviceName)
+    {
+        var device = new NativeMethods.DisplayDevice { cb = Marshal.SizeOf<NativeMethods.DisplayDevice>() };
+        if (!NativeMethods.EnumDisplayDevices(deviceName, 0, ref device, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME))
+            return null;
+
+        return ConvertDevicePathToWmiInstanceName(device.DeviceID);
+    }
+
+    /// <summary>
+    /// Converts a device interface path (\\?\DISPLAY#DELA1A6#5&amp;1234&amp;0&amp;UID4352#{guid})
+    /// to a WMI instance name (DISPLAY\DELA1A6\5&amp;1234&amp;0&amp;UID4352).
+    /// </summary>
+    internal static string? ConvertDevicePathToWmiInstanceName(string? devicePath)
+    {
+        if (string.IsNullOrEmpty(devicePath) || !devicePath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            return null;
+
+        var parts = devicePath.Split('#');
+        if (parts.Length < 3)
+            return null;
+
+        return $@"DISPLAY\{parts[1]}\{parts[2]}";
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static List<WmiMonitorData> ReadWmiMonitors()
+    {
+        var result = new List<WmiMonitorData>();
         using var searcher = new ManagementObjectSearcher("root\\WMI", "SELECT * FROM WmiMonitorID");
         foreach (ManagementObject obj in searcher.Get())
         {
             try
             {
-                // Get manufacturer name
-                if (obj["ManufacturerName"] is ushort[] manuData && manuData.Length > 0)
+                result.Add(new WmiMonitorData
                 {
-                    var manuName = new string(manuData.Where(x => x != 0).Select(x => (char)x).ToArray()).Trim();
-                    if (!string.IsNullOrEmpty(manuName) && string.IsNullOrEmpty(monitor.Manufacturer))
-                        monitor.Manufacturer = manuName;
-                }
-                
-                // Get serial number
-                if (obj["SerialNumberID"] is ushort[] serialData && serialData.Length > 0)
-                {
-                    var serial = new string(serialData.Where(x => x != 0).Select(x => (char)x).ToArray()).Trim();
-                    if (!string.IsNullOrEmpty(serial) && string.IsNullOrEmpty(monitor.SerialNumber))
-                        monitor.SerialNumber = serial;
-                }
-                
-                // Get user-friendly name (model)
-                if (obj["UserFriendlyName"] is ushort[] nameData && nameData.Length > 0)
-                {
-                    var model = new string(nameData.Where(x => x != 0).Select(x => (char)x).ToArray()).Trim();
-                    if (!string.IsNullOrEmpty(model))
-                        monitor.Model = model;
-                }
-                
-                // Get week and year of manufacture  
-                try
-                {
-                    if (obj["WeekOfManufacture"] != null)
-                    {
-                        var week = Convert.ToUInt16(obj["WeekOfManufacture"]);
-                        if (week > 0)
-                            monitor.WeekOfManufacture = week;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Could not read WeekOfManufacture: {ex.Message}");
-                }
-                
-                try
-                {
-                    if (obj["YearOfManufacture"] != null)
-                    {
-                        var year = Convert.ToUInt16(obj["YearOfManufacture"]);
-                        if (year > 0)
-                            monitor.YearOfManufacture = year;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Could not read YearOfManufacture: {ex.Message}");
-                }
-                
-                // Usually only one monitor match, but we take the first one
-                break;
+                    InstanceName = obj["InstanceName"] as string ?? string.Empty,
+                    Manufacturer = ConvertWmiString(obj["ManufacturerName"]),
+                    SerialNumber = ConvertWmiString(obj["SerialNumberID"]),
+                    Model = ConvertWmiString(obj["UserFriendlyName"]),
+                    WeekOfManufacture = ConvertWmiNumber(obj["WeekOfManufacture"]),
+                    YearOfManufacture = ConvertWmiNumber(obj["YearOfManufacture"])
+                });
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Could not read WmiMonitorID entry: {ex.Message}");
             }
         }
+
+        return result;
     }
-    
+
+    private static string ConvertWmiString(object? value)
+    {
+        if (value is not ushort[] data || data.Length == 0)
+            return string.Empty;
+
+        return new string(data.Where(x => x != 0).Select(x => (char)x).ToArray()).Trim();
+    }
+
+    private static int? ConvertWmiNumber(object? value)
+    {
+        if (value == null)
+            return null;
+
+        var number = Convert.ToInt32(value);
+        return number > 0 ? number : null;
+    }
+
+    private sealed class WmiMonitorData
+    {
+        public string InstanceName { get; init; } = string.Empty;
+        public string Manufacturer { get; init; } = string.Empty;
+        public string SerialNumber { get; init; } = string.Empty;
+        public string Model { get; init; } = string.Empty;
+        public int? WeekOfManufacture { get; init; }
+        public int? YearOfManufacture { get; init; }
+    }
+
     private (uint current, uint max) GetVcpFeatureRaw(IntPtr hPhysicalMonitor, byte vcpCode)
     {
         if (!NativeMethods.GetVCPFeatureAndVCPFeatureReply(
@@ -571,6 +632,10 @@ public class MonitorService : IMonitorService
         });
     }
 
+    /// <summary>
+    /// Resolves the HMONITOR for an index. The handle is looked up on every call because Windows
+    /// re-creates it when the display is re-enumerated (e.g. after switching PBP, which changes the EDID).
+    /// </summary>
     private IntPtr GetMonitorHandle(int index)
     {
         IntPtr result = IntPtr.Zero;
