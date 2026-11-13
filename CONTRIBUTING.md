@@ -83,7 +83,7 @@ Invoke-Pester ./PowerShell/Tests/
 ### C# Development
 
 Requirements:
-- .NET 8.0 SDK
+- .NET 10.0 SDK (see `global.json`)
 - Visual Studio 2022 or VS Code with C# extension
 
 ```bash
@@ -93,8 +93,11 @@ dotnet restore CSharp/MonitorTools.sln
 # Build
 dotnet build CSharp/MonitorTools.sln
 
-# Run tests
+# Run tests (hardware tests are skipped by default)
 dotnet test CSharp/MonitorTools.sln
+
+# Run hardware tests too (switches real monitor inputs/PBP!)
+# PowerShell: $env:MONITORTOOLS_HARDWARE_TESTS = "1"; dotnet test CSharp/MonitorTools.sln
 
 # Run CLI
 dotnet run --project CSharp/src/MonitorTools.CLI

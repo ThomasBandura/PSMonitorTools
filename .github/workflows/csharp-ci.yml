@@ -5,53 +5,59 @@ on:
     branches: [ master, develop ]
     paths:
       - 'CSharp/**'
+      - 'global.json'
       - '.github/workflows/csharp-ci.yml'
   pull_request:
     branches: [ master ]
     paths:
       - 'CSharp/**'
+      - 'global.json'
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
     runs-on: windows-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v7
+
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v6
       with:
-        dotnet-version: '8.0.x'
-        
+        global-json-file: global.json
+
     - name: Restore dependencies
       run: dotnet restore CSharp/MonitorTools.sln
-      
+
     - name: Build
       run: dotnet build CSharp/MonitorTools.sln --configuration Release --no-restore
-      
+
     - name: Test (Unit Tests Only)
       run: dotnet test CSharp/tests/MonitorTools.Core.Tests/MonitorTools.Core.Tests.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
-      
+
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         directory: ./CSharp
-        
+        fail_ci_if_error: false
+
   publish:
     runs-on: windows-latest
     needs: build-and-test
     strategy:
       matrix:
         runtime: [win-x64, win-x86]
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v7
+
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v6
       with:
-        dotnet-version: '8.0.x'
-        
+        global-json-file: global.json
+
     - name: Publish ${{ matrix.runtime }}
       run: |
         dotnet publish CSharp/src/MonitorTools.CLI/MonitorTools.CLI.csproj `
@@ -61,7 +67,7 @@ jobs:
           --output "releases/CSharp/${{ matrix.runtime }}" `
           -p:PublishSingleFile=true `
           -p:IncludeNativeLibrariesForSelfExtract=true
-        
+
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:

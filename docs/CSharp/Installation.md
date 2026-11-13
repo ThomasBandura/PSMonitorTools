@@ -52,7 +52,7 @@ dotnet test --verbosity normal
 
 #### Publish Single-File Executable
 
-**Framework-Dependent** (~1.2 MB, requires .NET 8 Runtime):
+**Framework-Dependent** (~1.2 MB, requires .NET 10 Runtime):
 ```bash
 cd CSharp
 dotnet publish src/MonitorTools.CLI/MonitorTools.CLI.csproj -c Release -r win-x64 -o publish
@@ -85,4 +85,4 @@ MonitorTools.exe --help
 ## Requirements
 
 - Windows 11
-- .NET 8.0 Runtime (not required for self-contained builds)
+- .NET 10.0 Runtime (not required for self-contained builds)

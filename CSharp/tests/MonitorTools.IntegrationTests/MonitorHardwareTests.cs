@@ -5,10 +5,11 @@ namespace MonitorTools.IntegrationTests;
 /// <summary>
 /// Hardware integration tests for monitor control.
 /// WARNING: These tests interact with physical hardware and may flash the screen.
-/// Run only when a test monitor is connected.
+/// Run only when a test monitor is connected and MONITORTOOLS_HARDWARE_TESTS=1 is set.
 /// Tests match the structure of Monitor.Hardware.Tests.ps1
 /// </summary>
 [Collection("Hardware")]
+[Trait("Category", "Hardware")]
 public class MonitorHardwareTests : IDisposable
 {
     private readonly MonitorService _service;
@@ -54,7 +55,7 @@ public class MonitorHardwareTests : IDisposable
 
     // ===== Basic Switching and PBP =====
 
-    [Fact]
+    [HardwareFact]
     public void Test01_DisablesPbpInitially()
     {
         if (_skipTests) return;
@@ -67,7 +68,7 @@ public class MonitorHardwareTests : IDisposable
         Assert.False(_service.IsPbpEnabled(_testMonitorIndex));
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test02_SwitchesToHdmi1()
     {
         if (_skipTests) return;
@@ -81,7 +82,7 @@ public class MonitorHardwareTests : IDisposable
         Assert.Equal(MonitorInput.Hdmi1, current);
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test03_SwitchesToDisplayPort()
     {
         if (_skipTests) return;
@@ -95,7 +96,7 @@ public class MonitorHardwareTests : IDisposable
         Assert.Equal(MonitorInput.DisplayPort, current);
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test04_EnablesPbp()
     {
         if (_skipTests) return;
@@ -111,7 +112,7 @@ public class MonitorHardwareTests : IDisposable
 
     // ===== PBP Combination Matrix =====
 
-    [Theory]
+    [HardwareTheory]
     [InlineData(MonitorInput.Hdmi1, MonitorInput.Hdmi2)]
     [InlineData(MonitorInput.Hdmi1, MonitorInput.UsbC)]
     [InlineData(MonitorInput.DisplayPort, MonitorInput.Hdmi1)]
@@ -178,7 +179,7 @@ public class MonitorHardwareTests : IDisposable
 
     // ===== Cleanup =====
 
-    [Fact]
+    [HardwareFact]
     public void Test06_DisablesPbpAgain()
     {
         if (_skipTests) return;
@@ -191,7 +192,7 @@ public class MonitorHardwareTests : IDisposable
         Assert.False(_service.IsPbpEnabled(_testMonitorIndex));
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test07_ResetsToDisplayPort()
     {
         if (_skipTests) return;
@@ -207,7 +208,7 @@ public class MonitorHardwareTests : IDisposable
 
     // ===== Smart Ordering and Collision Avoidance =====
 
-    [Fact]
+    [HardwareFact]
     public void Test08_SmartOrderingSetup()
     {
         if (_skipTests) return;
@@ -227,7 +228,7 @@ public class MonitorHardwareTests : IDisposable
         Assert.Equal(MonitorInput.UsbC, rightInput);
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test09_SmartOrderingHandlesCollision()
     {
         if (_skipTests) return;
@@ -268,7 +269,7 @@ public class MonitorHardwareTests : IDisposable
         }
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test10_SmartOrderingCleanup()
     {
         if (_skipTests) return;
@@ -287,7 +288,7 @@ public class MonitorHardwareTests : IDisposable
 
     // ===== Audio, Contrast and Brightness =====
 
-    [Fact]
+    [HardwareFact]
     public void Test11_ControlsAudioMute()
     {
         if (_skipTests) return;
@@ -327,7 +328,7 @@ public class MonitorHardwareTests : IDisposable
         }
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test12_ControlsAudioVolume()
     {
         if (_skipTests) return;
@@ -361,7 +362,7 @@ public class MonitorHardwareTests : IDisposable
         }
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test13_ControlsContrast()
     {
         if (_skipTests) return;
@@ -395,7 +396,7 @@ public class MonitorHardwareTests : IDisposable
         }
     }
 
-    [Fact]
+    [HardwareFact]
     public void Test14_ControlsBrightness()
     {
         if (_skipTests) return;

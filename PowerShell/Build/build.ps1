@@ -5,8 +5,13 @@ param(
     [string]$OutputPath = "$PSScriptRoot\..\..\releases\PowerShell",
     
     [Parameter()]
-    [string]$Version = "1.0.0"
+    [string]$Version
 )
+
+# Default to the ModuleVersion from the source manifest
+if (-not $Version) {
+    $Version = (Import-PowerShellDataFile "$PSScriptRoot\..\PSMonitorTools\PSMonitorTools.psd1").ModuleVersion
+}
 
 $ErrorActionPreference = 'Stop'
 
