@@ -36,7 +36,7 @@ jobs:
         ./PowerShell/Build/build.ps1 -Version $env:VERSION
 
     - name: Upload PowerShell Module
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: PSMonitorTools-Module
         path: ./releases/PowerShell/PSMonitorTools-v${{ steps.get_version.outputs.version }}.zip
@@ -83,7 +83,7 @@ jobs:
           -p:Version="$env:VERSION"
 
     - name: Upload C# CLI
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: MonitorTools-CLI-${{ matrix.runtime }}
         path: ./releases/CSharp/${{ matrix.runtime }}/MonitorTools.exe
@@ -96,19 +96,19 @@ jobs:
 
     steps:
     - name: Download PowerShell Module
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: PSMonitorTools-Module
         path: ./artifacts/powershell
 
     - name: Download C# CLI (win-x64)
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: MonitorTools-CLI-win-x64
         path: ./artifacts/csharp/win-x64
 
     - name: Download C# CLI (win-x86)
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: MonitorTools-CLI-win-x86
         path: ./artifacts/csharp/win-x86
