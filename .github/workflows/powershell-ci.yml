@@ -29,25 +29,16 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Install Pester
-      shell: ${{ matrix.shell }}
-      run: |
-        # -SkipPublisherCheck is required on Windows runners because the inbox Pester 3.x has a different publisher.
-        Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
-
     - name: Run Pester Tests (Unit Tests and Shared Behavior Spec)
-      shell: ${{ matrix.shell }}
+      shell: pwsh
+      env:
+        TEST_SHELL: ${{ matrix.shell }}
       run: |
-        Import-Module Pester -RequiredVersion 5.7.1
-        $PSVersionTable.PSVersion
-        $config = New-PesterConfiguration
-        $config.Run.Path = @("PowerShell/Tests/Monitor.Tests.ps1", "PowerShell/Tests/Behavior.Spec.Tests.ps1")
-        $config.Run.Exit = $true
-        $config.Output.Verbosity = "Detailed"
         # Coverage once, on PowerShell 7
-        $config.CodeCoverage.Enabled = ($PSVersionTable.PSEdition -eq 'Core')
-        $config.CodeCoverage.Path = "PowerShell/PSMonitorTools/*.ps*1"
-        Invoke-Pester -Configuration $config
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'PowerShell/Build/Invoke-CITests.ps1', '-InstallPester')
+        if ($env:TEST_SHELL -eq 'pwsh') { $arguments += '-CodeCoverage' }
+        & $env:TEST_SHELL @arguments
+        exit $LASTEXITCODE
 
   build:
     runs-on: windows-latest

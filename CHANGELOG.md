@@ -7,14 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-14
+
 ### Added
 - Shared behavior cases in `spec/monitor-behavior.json` (PBP detection, left input mask, value limits, input switch order and rejections); Pester and xUnit both test against them, so a rule changed on one side only fails CI (#34).
 - PowerShell CI runs the Pester tests on Windows PowerShell 5.1 as well as PowerShell 7, and fails on test failures (`Run.Exit`).
 
 ### Changed
 - PowerShell: the behavior rules are small helper functions (`Test-PbpModeActive`, `Get-LeftInputValue`, `Get-VcpValueLimit`, `Get-InputSwitchPlan`); `Switch-MonitorInput` uses them. Error messages for PBP conflicts now match the CLI.
+- PowerShell: the capabilities string (model name) is read once per monitor and session instead of on every cmdlet call; on the Dell U4924DW a call drops from about 1.8 s to under 0.1 s after the first one (#21).
+- PowerShell: tab completion for `-MonitorName` uses monitor descriptions, WMI names and cached model names only, without DDC/CI reads (#21).
+- CLI: migrated from System.CommandLine 2.0.0-beta4 to 3.0.0; shared `--monitor` option and central error handling, commands return exit codes instead of calling `Environment.Exit` (#27).
+- C#: monitor indexes refer to physical monitors (like the PowerShell module), so cloned displays are reachable individually (#8).
+- Brightness, contrast and volume are checked against the maximum reported by the monitor instead of a fixed 0-100; C# sets the brightness via VCP 0x10 like the PowerShell module (#30).
 
 ### Fixed
+- CI: the PowerShell workflow was invalid after the 5.1 matrix was added and ran no jobs; the tests now run through `PowerShell/Build/Invoke-CITests.ps1` on PowerShell 7 and Windows PowerShell 5.1.
 - PowerShell 5.1: `-ErrorVariable` no longer contains an internal `StopUpstreamCommandsException` after a cmdlet call.
 - C#/CLI: input switches are confirmed by the monitor step by step instead of fixed 2-second pauses; a switch the monitor ignores now fails with exit code 1 instead of reporting success. A missing DDC/CI answer after switching away is reported as a warning.
 - C#/CLI: while PBP is active, a left input already shown on the right (and vice versa) is rejected, and swapping left and right is rejected with a clear message; the monitor silently ignored both before. PowerShell rejects the swap up front as well.
@@ -22,13 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: `vcp set` accepts hex values (`vcp set 0x60 0xF0F`), as already shown in the documentation.
 - C#: `SetInput` (`input set`, `input switch`, `pbp set-left`) masks the left input with 0xF00 while PBP is active, like the PowerShell module. On the Dell U4924DW, PBP also stayed on without the mask (#6).
 - C#: every VCP 0xE9 value other than 0x00 counts as PBP active, like the PowerShell module; monitors without PBP support count as inactive when switching inputs (#7).
-
-### Changed
-- PowerShell: the capabilities string (model name) is read once per monitor and session instead of on every cmdlet call; on the Dell U4924DW a call drops from about 1.8 s to under 0.1 s after the first one (#21).
-- PowerShell: tab completion for `-MonitorName` uses monitor descriptions, WMI names and cached model names only, without DDC/CI reads (#21).
-- CLI: migrated from System.CommandLine 2.0.0-beta4 to 3.0.0; shared `--monitor` option and central error handling, commands return exit codes instead of calling `Environment.Exit` (#27).
-- C#: monitor indexes refer to physical monitors (like the PowerShell module), so cloned displays are reachable individually (#8).
-- Brightness, contrast and volume are checked against the maximum reported by the monitor instead of a fixed 0-100; C# sets the brightness via VCP 0x10 like the PowerShell module (#30).
 
 ### Documentation
 - Audio mute (VCP 0x8D) is documented as device-specific: Dell U4924DW uses 0x00 = muted, 0x01 = unmuted and ignores the MCCS values (0x01 = muted, 0x02 = unmuted) (#15).
