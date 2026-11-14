@@ -22,7 +22,7 @@ public static class GetInfoCommand
         command.SetAction(parseResult => CliCommon.Run(() =>
         {
             bool verbose = parseResult.GetValue(verboseOption);
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             var monitors = service.GetMonitors();
 
             if (monitors.Length == 0)

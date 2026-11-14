@@ -48,6 +48,25 @@ public class MonitorHardwareTests : IDisposable
         catch { }
     }
 
+    /// <summary>
+    /// Brings the monitor into a known PBP state (left DisplayPort, given right input), independent
+    /// of the order in which the tests run. The right input must not be DisplayPort.
+    /// </summary>
+    private void ArrangePbp(MonitorInput right)
+    {
+        if (_service.IsPbpEnabled(_testMonitorIndex))
+        {
+            _service.DisablePbp(_testMonitorIndex);
+            Sleep();
+            Sleep();
+        }
+        _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
+        _service.EnablePbp(_testMonitorIndex);
+        Sleep();
+        Sleep();
+        _service.SetPbpRightInput(right, _testMonitorIndex);
+    }
+
     private void Sleep()
     {
         Thread.Sleep(2000);
@@ -121,60 +140,22 @@ public class MonitorHardwareTests : IDisposable
     {
         if (_skipTests) return;
 
-        try
-        {
-            // Reset to known state: Disable PBP, set to DisplayPort
-            if (_service.IsPbpEnabled(_testMonitorIndex))
-            {
-                _service.DisablePbp(_testMonitorIndex);
-                Sleep();
-                Sleep();
-            }
-            _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
-            Sleep();
-            
-            // Now enable PBP
-            _service.EnablePbp(_testMonitorIndex);
-            Sleep();
-            Sleep();
+        // Known state: PBP on, left DisplayPort, right on an input not used by the target.
+        // The monitor restores the last right input when PBP is enabled, which could otherwise
+        // turn the target into a swap (rejected, see Test09c).
+        var freeRight = new[] { MonitorInput.Hdmi1, MonitorInput.Hdmi2, MonitorInput.UsbC }
+            .First(i => i != left && i != right);
+        ArrangePbp(freeRight);
 
-            Console.WriteLine($"Testing PBP: Left={left}, Right={right}");
+        Console.WriteLine($"Testing PBP: Left={left}, Right={right}");
 
-            // Act
-            _service.SetInputSmart(left, right, _testMonitorIndex);
-            Sleep();
+        // Act - each step is confirmed by the monitor; a switch it ignores throws
+        _service.SetInputSmart(left, right, _testMonitorIndex);
 
-            // Assert
-            var actualLeft = _service.GetInput(_testMonitorIndex);
-            var actualRight = _service.GetPbpRightInput(_testMonitorIndex);
-            
-            // Some combinations may auto-disable PBP or fail to switch
-            if (_service.IsPbpEnabled(_testMonitorIndex))
-            {
-                // Check if inputs actually switched
-                if (actualLeft == left && actualRight == right)
-                {
-                    // Perfect - both inputs switched as expected
-                    Assert.Equal(left, actualLeft);
-                    Assert.Equal(right, actualRight);
-                }
-                else
-                {
-                    // Inputs didn't switch - monitor rejected this combination
-                    Console.WriteLine($"Warning: Monitor did not switch to {left}/{right} (actual: {actualLeft}/{actualRight})");
-                    Console.WriteLine("This combination may not be supported or conflicts with active connection");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"Warning: PBP was disabled by monitor for {left}/{right}");
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.WriteLine($"PBP combination not supported: {ex.Message}");
-            return;
-        }
+        // Assert
+        Assert.True(_service.IsPbpEnabled(_testMonitorIndex));
+        Assert.Equal(left, _service.GetInput(_testMonitorIndex));
+        Assert.Equal(right, _service.GetPbpRightInput(_testMonitorIndex));
     }
 
     // ===== Cleanup =====
@@ -214,14 +195,7 @@ public class MonitorHardwareTests : IDisposable
         if (_skipTests) return;
 
         // Arrange - Enable PBP and set distinct inputs
-        _service.EnablePbp(_testMonitorIndex);
-        Sleep();
-        Sleep();
-
-        _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
-        Sleep();
-        _service.SetPbpRightInput(MonitorInput.UsbC, _testMonitorIndex);
-        Sleep();
+        ArrangePbp(MonitorInput.UsbC);
 
         // Assert
         var rightInput = _service.GetPbpRightInput(_testMonitorIndex);
@@ -233,40 +207,21 @@ public class MonitorHardwareTests : IDisposable
     {
         if (_skipTests) return;
 
-        try
-        {
-            // Ensure PBP is enabled and set initial state
-            if (!_service.IsPbpEnabled(_testMonitorIndex))
-            {
-                _service.EnablePbp(_testMonitorIndex);
-                Sleep();
-                Sleep();
-            }
+        // Setup: DisplayPort + UsbC with PBP
+        ArrangePbp(MonitorInput.UsbC);
 
-            // Setup: Set to DisplayPort + UsbC
-            _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
-            Sleep();
-            _service.SetPbpRightInput(MonitorInput.UsbC, _testMonitorIndex);
-            Sleep();
+        // This triggers smart ordering: Left=UsbC collides with current Right=UsbC
+        // Smart logic should switch Right first to free up UsbC
+        _service.SetInputSmart(MonitorInput.UsbC, MonitorInput.Hdmi1, _testMonitorIndex);
+        Sleep();
+        Sleep();
 
-            // This triggers smart ordering: Left=UsbC collides with current Right=UsbC
-            // Smart logic should switch Right first to free up UsbC
-            _service.SetInputSmart(MonitorInput.UsbC, MonitorInput.Hdmi1, _testMonitorIndex);
-            Sleep();
-            Sleep();
+        // Assert
+        var actualLeft = _service.GetInput(_testMonitorIndex);
+        var actualRight = _service.GetPbpRightInput(_testMonitorIndex);
 
-            // Assert
-            var actualLeft = _service.GetInput(_testMonitorIndex);
-            var actualRight = _service.GetPbpRightInput(_testMonitorIndex);
-
-            Assert.Equal(MonitorInput.UsbC, actualLeft);
-            Assert.Equal(MonitorInput.Hdmi1, actualRight);
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.WriteLine($"Smart ordering test failed: {ex.Message}");
-            return;
-        }
+        Assert.Equal(MonitorInput.UsbC, actualLeft);
+        Assert.Equal(MonitorInput.Hdmi1, actualRight);
     }
 
     [HardwareFact]
@@ -275,12 +230,7 @@ public class MonitorHardwareTests : IDisposable
         if (_skipTests) return;
 
         // Arrange - PBP on (left masked with 0xF00, #6)
-        if (!_service.IsPbpEnabled(_testMonitorIndex))
-        {
-            _service.EnablePbp(_testMonitorIndex);
-            Sleep();
-            Sleep();
-        }
+        ArrangePbp(MonitorInput.Hdmi1);
 
         // Act
         _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
@@ -291,6 +241,25 @@ public class MonitorHardwareTests : IDisposable
         Assert.Equal(MonitorInput.DisplayPort, _service.GetInput(_testMonitorIndex));
         var (raw, _) = _service.GetVcpFeature(VcpCode.InputSource, _testMonitorIndex);
         Assert.Equal(PbpModeValue.LeftInputMask, raw & 0xF00);
+    }
+
+    [HardwareFact]
+    public void Test09c_RejectsInputsTheMonitorWouldIgnore()
+    {
+        if (_skipTests) return;
+
+        // Arrange - PBP on, left DisplayPort, right Hdmi1
+        ArrangePbp(MonitorInput.Hdmi1);
+
+        // Act + Assert - left = current right, right = current left, swap
+        Assert.Throws<InvalidOperationException>(() => _service.SetInput(MonitorInput.Hdmi1, _testMonitorIndex));
+        Assert.Throws<InvalidOperationException>(() => _service.SetPbpRightInput(MonitorInput.DisplayPort, _testMonitorIndex));
+        Assert.Throws<InvalidOperationException>(
+            () => _service.SetInputSmart(MonitorInput.Hdmi1, MonitorInput.DisplayPort, _testMonitorIndex));
+
+        // Nothing was sent
+        Assert.Equal(MonitorInput.DisplayPort, _service.GetInput(_testMonitorIndex));
+        Assert.Equal(MonitorInput.Hdmi1, _service.GetPbpRightInput(_testMonitorIndex));
     }
 
     [HardwareFact]

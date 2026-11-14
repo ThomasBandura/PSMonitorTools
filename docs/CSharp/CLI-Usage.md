@@ -183,7 +183,11 @@ MonitorTools input switch --left UsbC --right Hdmi1 -m 0
 **Unterbefehle:**
 - `get`: Zeigt die aktuelle Eingabequelle
 - `set <source>`: Setzt die Eingabequelle
-- `switch [--left <source>] [--right <source>]`: Setzt den linken und/oder rechten Eingang. Bei aktivem PBP wird die Reihenfolge automatisch so gewählt, dass links und rechts nie gleichzeitig denselben Eingang verwenden (z. B. beim Tauschen der Seiten). Links und rechts dürfen bei aktivem PBP nicht gleich sein.
+- `switch [--left <source>] [--right <source>]`: Setzt den linken und/oder rechten Eingang. Bei aktivem PBP wird die Reihenfolge automatisch so gewählt, dass links und rechts nie gleichzeitig denselben Eingang verwenden. Links und rechts dürfen bei aktivem PBP nicht gleich sein.
+
+**Bestätigung und Kollisionen:** Jeder Wechsel wird erst abgeschlossen, wenn der Monitor den neuen Eingang meldet (bis zu 10 Sekunden). Ignoriert der Monitor den Wechsel, endet der Befehl mit Exit-Code 1. Antwortet der Monitor nach dem Wechsel gar nicht mehr (dieser PC ist am neuen Eingang nicht angeschlossen), gibt es nur eine Warnung. Bei aktivem PBP gilt außerdem:
+- `input set` bzw. `pbp set-left` mit dem Eingang, den rechts gerade anzeigt, wird abgelehnt (der Monitor würde den Befehl ignorieren). Dasselbe gilt für `pbp set-right` mit dem linken Eingang.
+- Ein Tausch der Seiten (z. B. links DisplayPort/rechts Hdmi1 → links Hdmi1/rechts DisplayPort) ist in einem Schritt nicht möglich und wird abgelehnt. Erst eine Seite auf einen freien Eingang stellen, dann umschalten.
 
 **Verfügbare Eingabequellen:**
 - `Hdmi1` (0x11)
@@ -255,7 +259,7 @@ MonitorTools vcp set 0xE9 0x24 -m 0
 
 **Argumente:**
 - `<code>`: VCP-Code in Hexadezimal (z.B. 0x10) oder Dezimal (z.B. 10)
-- `<value>`: Zu setzender Wert (uint32)
+- `<value>`: Zu setzender Wert (uint32), dezimal oder hexadezimal mit `0x` (z. B. `50` oder `0xF0F`)
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)

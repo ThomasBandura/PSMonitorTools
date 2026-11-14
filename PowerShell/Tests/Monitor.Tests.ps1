@@ -516,6 +516,20 @@ Describe 'Monitor module logic (mocked hardware, part 2)' {
             }
         }
 
+        It 'rejects swapping left and right when PBP is active' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF0F }   # left = DisplayPort
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x11 }    # right = Hdmi1
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -InputRight DisplayPort -Confirm:$false `
+                    -ErrorAction SilentlyContinue -ErrorVariable err | Should -BeFalse
+                "$err" | Should -Match 'Swapping left \(0x0F\) and right \(0x11\)'
+                Should -Invoke Invoke-VcpSet -Times 0 -Exactly
+            }
+        }
+
         It 'switches the right input first when the new left input is the current right input (smart ordering)' {
             InModuleScope PSMonitorTools {
                 $script:sets = [System.Collections.Generic.List[string]]::new()

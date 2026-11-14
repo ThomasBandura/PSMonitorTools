@@ -29,6 +29,17 @@ internal static class CliCommon
     };
 
     /// <summary>
+    /// Creates the monitor service; its warnings are written to stderr
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public static MonitorService CreateService()
+    {
+        var service = new MonitorService();
+        service.Warning += (_, message) => Console.Error.WriteLine($"Warning: {message}");
+        return service;
+    }
+
+    /// <summary>
     /// Runs a command action with central error handling. Errors go to stderr and return exit code 1.
     /// </summary>
     public static int Run(Func<int> action)

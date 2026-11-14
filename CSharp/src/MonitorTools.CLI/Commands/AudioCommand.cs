@@ -42,7 +42,7 @@ public static class AudioCommand
 
         command.SetAction(parseResult => CliCommon.Run(() =>
         {
-            action(new MonitorService(), parseResult.GetValue(monitorOption));
+            action(CliCommon.CreateService(), parseResult.GetValue(monitorOption));
             return CliCommon.Success;
         }));
 

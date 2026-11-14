@@ -677,6 +677,17 @@ function Switch-MonitorInput {
                 Write-Error ("Invalid PBP Configuration: Input Left (0x{0:x}) cannot be the same as Input Right (0x{1:x})." -f $targetLeftKey, $targetRightKey)
                 return $false
             }
+
+            # Swapping both sides is not possible in one step: the monitor ignores a switch to the
+            # input the other side is showing, in either order
+            if ($doSetLeft -and $doSetRight -and
+                (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) -and
+                (([uint32]$InputRight -band 0xFF) -eq $currentLeftVal)) {
+                Write-Error (("Swapping left (0x{0:X2}) and right (0x{1:X2}) is not possible in one step: " +
+                    "the monitor ignores a switch to the input the other side is showing. " +
+                    "Switch one side to a free input first.") -f $currentLeftVal, $currentRightVal)
+                return $false
+            }
         }
         
         # Waits until the monitor reports the expected value for one step.
