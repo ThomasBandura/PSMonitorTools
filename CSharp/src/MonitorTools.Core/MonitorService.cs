@@ -157,9 +157,34 @@ public class MonitorService : IMonitorService
     /// <summary>
     /// Sets the input source of a specific monitor
     /// </summary>
+    /// <remarks>
+    /// While PBP is active, the value is masked with <see cref="PbpModeValue.LeftInputMask"/>
+    /// so that PBP stays on.
+    /// </remarks>
     public void SetInput(MonitorInput input, int monitorIndex = 0)
     {
-        SetVcpFeature(VcpCode.InputSource, (uint)input, monitorIndex);
+        SetLeftInput(input, TryGetPbpEnabled(monitorIndex), monitorIndex);
+    }
+
+    private void SetLeftInput(MonitorInput input, bool pbpActive, int monitorIndex)
+    {
+        SetVcpFeature(VcpCode.InputSource, PbpModeValue.GetLeftInputValue(input, pbpActive), monitorIndex);
+    }
+
+    /// <summary>
+    /// Returns the PBP state, or false if the monitor does not answer VCP 0xE9 (no PBP support)
+    /// </summary>
+    private bool TryGetPbpEnabled(int monitorIndex)
+    {
+        ValidateMonitorIndex(monitorIndex);
+        try
+        {
+            return IsPbpEnabled(monitorIndex);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -170,8 +195,8 @@ public class MonitorService : IMonitorService
         if (!leftInput.HasValue && !rightInput.HasValue)
             throw new ArgumentException("At least one input (left or right) must be specified");
 
-        // Check if PBP is active
-        bool pbpActive = IsPbpEnabled(monitorIndex);
+        // Check if PBP is active (monitors without PBP support count as inactive)
+        bool pbpActive = TryGetPbpEnabled(monitorIndex);
 
         if (pbpActive && leftInput.HasValue && rightInput.HasValue)
         {
@@ -194,7 +219,7 @@ public class MonitorService : IMonitorService
                 // Switch right first to free up the input for left
                 SetPbpRightInput(rightInput.Value, monitorIndex);
                 Thread.Sleep(2000);
-                SetInput(leftInput.Value, monitorIndex);
+                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
                 Thread.Sleep(2000);
             }
             else
@@ -202,7 +227,7 @@ public class MonitorService : IMonitorService
                 // No collision: switch in normal order (left first, then right)
                 // Note: If target right matches current left, this is NOT a problem
                 // because we switch left first, which frees up the input for right
-                SetInput(leftInput.Value, monitorIndex);
+                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
                 Thread.Sleep(2000);
                 SetPbpRightInput(rightInput.Value, monitorIndex);
                 Thread.Sleep(2000);
@@ -213,7 +238,7 @@ public class MonitorService : IMonitorService
             // PBP not active or single input switch
             if (leftInput.HasValue)
             {
-                SetInput(leftInput.Value, monitorIndex);
+                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
                 Thread.Sleep(2000);
             }
             if (rightInput.HasValue)
@@ -227,10 +252,13 @@ public class MonitorService : IMonitorService
     /// <summary>
     /// Checks if PBP (Picture-by-Picture) mode is enabled
     /// </summary>
+    /// <remarks>
+    /// Every PBP/PIP mode other than off (VCP 0xE9 != 0x00) counts as enabled, same as the PowerShell module.
+    /// </remarks>
     public bool IsPbpEnabled(int monitorIndex = 0)
     {
         var (current, _) = GetVcpFeature(VcpCode.PbpMode, monitorIndex);
-        return current == PbpModeValue.On;
+        return PbpModeValue.IsActive(current);
     }
 
     /// <summary>

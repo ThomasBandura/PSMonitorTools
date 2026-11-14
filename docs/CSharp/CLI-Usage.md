@@ -232,7 +232,7 @@ MonitorTools pbp set-right UsbC -m 0
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
 
-**Hinweis:** PBP ist eine herstellerspezifische Funktion. Nicht alle Monitore unterstützen PBP. Der `set-left` Befehl ist ein Alias für `input set` und steuert VCP Code 0x60 (primärer Eingang).
+**Hinweis:** PBP ist eine herstellerspezifische Funktion. Nicht alle Monitore unterstützen PBP. Der `set-left` Befehl ist ein Alias für `input set` und steuert VCP Code 0x60 (primärer Eingang). Bei aktivem PBP wird der Wert mit 0xF00 maskiert, damit PBP eingeschaltet bleibt. Jeder Wert von 0xE9 ungleich 0x00 gilt als aktives PBP/PIP.
 
 ### VCP (Low-Level DDC/CI-Steuerung)
 
@@ -285,7 +285,7 @@ MonitorTools vcp set 0xD6 1 --force
 - `0x8D`: Audio Mute (gerätespezifisch, Dell: 0x00 = Mute, 0x01 = Unmute; MCCS: 0x01 = Mute, 0x02 = Unmute)
 - `0xC9`: Firmware-Version
 - `0xE8`: PBP Right Input
-- `0xE9`: PBP-Modus (0x00 = Aus, 0x24 = Ein)
+- `0xE9`: PBP-Modus (0x00 = Aus, 0x24 = Ein; andere Werte ungleich 0x00 gelten ebenfalls als aktiv)
 
 **Warnung:** Falsche VCP-Werte können zu unerwartetem Verhalten führen. Verwenden Sie diesen Befehl nur, wenn Sie mit DDC/CI-Standards vertraut sind.
 

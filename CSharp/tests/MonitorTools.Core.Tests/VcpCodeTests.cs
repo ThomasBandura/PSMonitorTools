@@ -96,4 +96,24 @@ public class PbpModeValueTests
     {
         Assert.Equal(0x24u, PbpModeValue.On);
     }
+
+    [Theory]
+    [InlineData(0x00u, false)]
+    [InlineData(0x24u, true)]
+    [InlineData(0x21u, true)]   // other PBP/PIP modes count as active (#7)
+    [InlineData(0x01u, true)]
+    public void IsActive_TreatsEveryValueExceptOffAsActive(uint value, bool expected)
+    {
+        Assert.Equal(expected, PbpModeValue.IsActive(value));
+    }
+
+    [Theory]
+    [InlineData(MonitorInput.DisplayPort, false, 0x0Fu)]
+    [InlineData(MonitorInput.Hdmi1, false, 0x11u)]
+    [InlineData(MonitorInput.DisplayPort, true, 0xF0Fu)]
+    [InlineData(MonitorInput.UsbC, true, 0xF1Bu)]
+    public void GetLeftInputValue_MasksOnlyWhilePbpIsActive(MonitorInput input, bool pbpActive, uint expected)
+    {
+        Assert.Equal(expected, PbpModeValue.GetLeftInputValue(input, pbpActive));
+    }
 }
