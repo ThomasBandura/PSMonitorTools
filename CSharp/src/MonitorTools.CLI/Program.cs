@@ -3,25 +3,23 @@ using MonitorTools.CLI.Commands;
 
 namespace MonitorTools.CLI;
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 class Program
 {
-    static async Task<int> Main(string[] args)
+    static int Main(string[] args)
     {
         var rootCommand = new RootCommand("MonitorTools - Monitor information and brightness control");
 
-        // Add commands
-        rootCommand.AddCommand(GetInfoCommand.Create());
-        rootCommand.AddCommand(GetBrightnessCommand.Create());
-        rootCommand.AddCommand(SetBrightnessCommand.Create());
-        rootCommand.AddCommand(GetContrastCommand.Create());
-        rootCommand.AddCommand(SetContrastCommand.Create());
-        rootCommand.AddCommand(GetVolumeCommand.Create());
-        rootCommand.AddCommand(SetVolumeCommand.Create());
-        rootCommand.AddCommand(AudioCommand.Create());
-        rootCommand.AddCommand(InputCommand.Create());
-        rootCommand.AddCommand(PbpCommand.Create());
-        rootCommand.AddCommand(VcpCommand.Create());
+        rootCommand.Subcommands.Add(GetInfoCommand.Create());
+        foreach (var command in LevelCommands.CreateAll())
+        {
+            rootCommand.Subcommands.Add(command);
+        }
+        rootCommand.Subcommands.Add(AudioCommand.Create());
+        rootCommand.Subcommands.Add(InputCommand.Create());
+        rootCommand.Subcommands.Add(PbpCommand.Create());
+        rootCommand.Subcommands.Add(VcpCommand.Create());
 
-        return await rootCommand.InvokeAsync(args);
+        return rootCommand.Parse(args).Invoke();
     }
 }

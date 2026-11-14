@@ -13,75 +13,38 @@ public static class AudioCommand
     {
         var command = new Command("audio", "Control monitor audio (mute/unmute)");
 
-        // Mute subcommand
-        var muteCommand = new Command("mute", "Mute monitor audio");
-        var muteMonitorOption = new Option<int>(
-            aliases: new[] { "--monitor", "-m" },
-            getDefaultValue: () => 0,
-            description: "Monitor index (0-based, default: 0)");
-        muteCommand.AddOption(muteMonitorOption);
-        muteCommand.SetHandler((monitorIndex) =>
+        command.Subcommands.Add(CreateSubcommand("mute", "Mute monitor audio", (service, monitorIndex) =>
         {
-            try
-            {
-                var service = new MonitorService();
-                service.Mute(monitorIndex);
-                Console.WriteLine($"Monitor {monitorIndex} audio muted");
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-        }, muteMonitorOption);
+            service.Mute(monitorIndex);
+            Console.WriteLine($"Monitor {monitorIndex} audio muted");
+        }));
 
-        // Unmute subcommand
-        var unmuteCommand = new Command("unmute", "Unmute monitor audio");
-        var unmuteMonitorOption = new Option<int>(
-            aliases: new[] { "--monitor", "-m" },
-            getDefaultValue: () => 0,
-            description: "Monitor index (0-based, default: 0)");
-        unmuteCommand.AddOption(unmuteMonitorOption);
-        unmuteCommand.SetHandler((monitorIndex) =>
+        command.Subcommands.Add(CreateSubcommand("unmute", "Unmute monitor audio", (service, monitorIndex) =>
         {
-            try
-            {
-                var service = new MonitorService();
-                service.Unmute(monitorIndex);
-                Console.WriteLine($"Monitor {monitorIndex} audio unmuted");
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-        }, unmuteMonitorOption);
+            service.Unmute(monitorIndex);
+            Console.WriteLine($"Monitor {monitorIndex} audio unmuted");
+        }));
 
-        // Status subcommand
-        var statusCommand = new Command("status", "Get monitor audio mute status");
-        var statusMonitorOption = new Option<int>(
-            aliases: new[] { "--monitor", "-m" },
-            getDefaultValue: () => 0,
-            description: "Monitor index (0-based, default: 0)");
-        statusCommand.AddOption(statusMonitorOption);
-        statusCommand.SetHandler((monitorIndex) =>
+        command.Subcommands.Add(CreateSubcommand("status", "Get monitor audio mute status", (service, monitorIndex) =>
         {
-            try
-            {
-                var service = new MonitorService();
-                var isMuted = service.IsMuted(monitorIndex);
-                Console.WriteLine($"Monitor {monitorIndex} audio: {(isMuted ? "Muted" : "Unmuted")}");
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-        }, statusMonitorOption);
+            var isMuted = service.IsMuted(monitorIndex);
+            Console.WriteLine($"Monitor {monitorIndex} audio: {(isMuted ? "Muted" : "Unmuted")}");
+        }));
 
-        command.AddCommand(muteCommand);
-        command.AddCommand(unmuteCommand);
-        command.AddCommand(statusCommand);
+        return command;
+    }
+
+    private static Command CreateSubcommand(string name, string description, Action<MonitorService, int> action)
+    {
+        var command = new Command(name, description);
+        var monitorOption = CliCommon.CreateMonitorOption();
+        command.Options.Add(monitorOption);
+
+        command.SetAction(parseResult => CliCommon.Run(() =>
+        {
+            action(new MonitorService(), parseResult.GetValue(monitorOption));
+            return CliCommon.Success;
+        }));
 
         return command;
     }

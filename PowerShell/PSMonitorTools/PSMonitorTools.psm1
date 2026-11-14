@@ -118,6 +118,50 @@ function Invoke-PhysicalMonitorAction {
     }
 }
 
+function Read-VcpFeatureNative {
+    <#
+    .SYNOPSIS
+        Reads a VCP feature once via DDC/CI. Returns an object with Current and Maximum, or $null.
+    .DESCRIPTION
+        Thin wrapper around the native call so the retry and verification logic can be tested with mocks.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle,
+
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode
+    )
+
+    [uint32]$currentValue = 0
+    [uint32]$maxValue = 0
+    if ([PSMonitorTools.Native.MonitorHelper]::GetVcpFeature($MonitorHandle, $VcpCode, [ref]$currentValue, [ref]$maxValue)) {
+        return [pscustomobject]@{ Current = $currentValue; Maximum = $maxValue }
+    }
+    return $null
+}
+
+function Write-VcpFeatureNative {
+    <#
+    .SYNOPSIS
+        Writes a VCP feature once via DDC/CI. Returns $true on success.
+    .DESCRIPTION
+        Thin wrapper around the native call so the retry logic can be tested with mocks.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle,
+
+        [Parameter(Mandatory=$true)]
+        [byte]$VcpCode,
+
+        [Parameter(Mandatory=$true)]
+        [uint32]$Value
+    )
+
+    return [PSMonitorTools.Native.MonitorHelper]::SetVCPFeature($MonitorHandle, $VcpCode, $Value)
+}
+
 function Invoke-VcpGet {
     <#
     .SYNOPSIS
@@ -142,15 +186,18 @@ function Invoke-VcpGet {
         [int]$MaxAttempts = 3,
 
         [Parameter(Mandatory=$false)]
-        [int]$RetryDelayMilliseconds = 500
+        [int]$RetryDelayMilliseconds = 500,
+
+        # Return the maximum value reported by the monitor instead of the current value
+        [Parameter(Mandatory=$false)]
+        [switch]$Maximum
     )
 
-    [uint32]$currentValue = 0
-    [uint32]$maxValue = 0
-
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        if ([PSMonitorTools.Native.MonitorHelper]::GetVcpFeature($MonitorHandle, $VcpCode, [ref]$currentValue, [ref]$maxValue)) {
-            return $currentValue
+        $reply = Read-VcpFeatureNative -MonitorHandle $MonitorHandle -VcpCode $VcpCode
+        if ($null -ne $reply) {
+            if ($Maximum) { return $reply.Maximum }
+            return $reply.Current
         }
 
         Write-Verbose ("Failed to read VCP code 0x{0:X2} ($FeatureName), attempt $attempt/$MaxAttempts" -f $VcpCode)
@@ -195,7 +242,7 @@ function Invoke-VcpSet {
     $attempt = 1
 
     while (-not $setSuccess -and $attempt -le $MaxRetries) {
-        if ([PSMonitorTools.Native.MonitorHelper]::SetVCPFeature($MonitorHandle, $VcpCode, $Value)) {
+        if (Write-VcpFeatureNative -MonitorHandle $MonitorHandle -VcpCode $VcpCode -Value $Value) {
             $setSuccess = $true
         } else {
             Write-Verbose "Attempt $attempt/$MaxRetries to set $FeatureName failed (Monitor busy?). Retrying in 1s..."
@@ -323,18 +370,33 @@ function Set-MonitorVcpValue {
         $CmdletContext,
         
         [Parameter(Mandatory=$false)]
-        [switch]$SkipVerification
+        [switch]$SkipVerification,
+
+        # Check the value against the maximum reported by the monitor (continuous values)
+        [Parameter(Mandatory=$false)]
+        [switch]$CheckMaximum
     )
-    
+
     $results = Invoke-PhysicalMonitorAction -MonitorName $MonitorName -Action {
         param($pm, $wmiMonitor, $idx)
-        
+
         $action = "Set $FeatureName to 0x{0:X}" -f $Value
-        if ($CmdletContext.ShouldProcess($pm.Description, $action)) {
-            return Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $VcpCode -Value $Value `
-                -MonitorDescription $pm.Description -FeatureName $FeatureName -SkipVerification:$SkipVerification
+        if (-not $CmdletContext.ShouldProcess($pm.Description, $action)) {
+            return $false
         }
-        return $false
+
+        if ($CheckMaximum) {
+            $max = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $VcpCode -FeatureName $FeatureName -Maximum
+            # A maximum of 0 or no answer means the monitor did not report one; then 0-100 is assumed
+            $limit = if ($max -gt 0) { [uint32]$max } else { [uint32]100 }
+            if ($Value -gt $limit) {
+                Write-Error "$FeatureName must be between 0 and $limit on '$($pm.Description)' (maximum reported by the monitor)."
+                return $false
+            }
+        }
+
+        return Invoke-VcpSet -MonitorHandle $pm.Handle -VcpCode $VcpCode -Value $Value `
+            -MonitorDescription $pm.Description -FeatureName $FeatureName -SkipVerification:$SkipVerification
     }
 
     return Resolve-MonitorSetResult -Results $results -MonitorName $MonitorName
@@ -694,7 +756,7 @@ function Set-MonitorAudioVolume {
     .PARAMETER MonitorName
         Name or model of the monitor to configure
     .PARAMETER Volume
-        Volume level (0-100)
+        Volume level (0 to the maximum reported by the monitor, usually 100)
     #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
@@ -702,12 +764,12 @@ function Set-MonitorAudioVolume {
         [string]$MonitorName,
         
         [Parameter(Mandatory = $true)]
-        [ValidateRange(0, 100)]
+        [ValidateRange(0, 65535)]
         [int]$Volume
     )
 
     return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioVolume `
-        -Value ([uint32]$Volume) -FeatureName "Audio Volume" -CmdletContext $PSCmdlet
+        -Value ([uint32]$Volume) -FeatureName "Audio Volume" -CmdletContext $PSCmdlet -CheckMaximum
 }
 
 function Get-MonitorAudio {
@@ -740,7 +802,8 @@ function Enable-MonitorAudio {
         [string]$MonitorName
     )
 
-    # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+    # VCP 0x8D, device-specific encoding (verified on Dell U4924DW): 0x00 = Mute, 0x01 = Unmute.
+    # MCCS defines 0x01 = Mute, 0x02 = Unmute; the Dell ignores 0x02. See docs (Audio).
     return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioMute `
         -Value 0x01 -FeatureName "Audio (Unmute)" -CmdletContext $PSCmdlet -SkipVerification
 }
@@ -758,7 +821,8 @@ function Disable-MonitorAudio {
         [string]$MonitorName
     )
 
-    # VCP 0x8D: 0x00 = Mute, 0x01 = Unmute
+    # VCP 0x8D, device-specific encoding (verified on Dell U4924DW): 0x00 = Mute, 0x01 = Unmute.
+    # MCCS defines 0x01 = Mute, 0x02 = Unmute; the Dell ignores 0x02. See docs (Audio).
     return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.AudioMute `
         -Value 0x00 -FeatureName "Audio (Mute)" -CmdletContext $PSCmdlet -SkipVerification
 }
@@ -786,7 +850,7 @@ function Set-MonitorBrightness {
     .PARAMETER MonitorName
         Name or model of the monitor to configure
     .PARAMETER Brightness
-        Brightness level (0-100)
+        Brightness level (0 to the maximum reported by the monitor, usually 100)
     #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
@@ -794,12 +858,12 @@ function Set-MonitorBrightness {
         [string]$MonitorName,
         
         [Parameter(Mandatory = $true)]
-        [ValidateRange(0, 100)]
+        [ValidateRange(0, 65535)]
         [int]$Brightness
     )
 
     return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Brightness `
-        -Value ([uint32]$Brightness) -FeatureName "Brightness" -CmdletContext $PSCmdlet
+        -Value ([uint32]$Brightness) -FeatureName "Brightness" -CmdletContext $PSCmdlet -CheckMaximum
 }
 
 function Get-MonitorContrast {
@@ -825,7 +889,7 @@ function Set-MonitorContrast {
     .PARAMETER MonitorName
         Name or model of the monitor to configure
     .PARAMETER Contrast
-        Contrast level (0-100)
+        Contrast level (0 to the maximum reported by the monitor, usually 100)
     #>
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param (
@@ -833,12 +897,12 @@ function Set-MonitorContrast {
         [string]$MonitorName,
         
         [Parameter(Mandatory = $true)]
-        [ValidateRange(0, 100)]
+        [ValidateRange(0, 65535)]
         [int]$Contrast
     )
 
     return Set-MonitorVcpValue -MonitorName $MonitorName -VcpCode $script:VcpCodes.Contrast `
-        -Value ([uint32]$Contrast) -FeatureName "Contrast" -CmdletContext $PSCmdlet
+        -Value ([uint32]$Contrast) -FeatureName "Contrast" -CmdletContext $PSCmdlet -CheckMaximum
 }
 
 function Find-MonitorVcpCodes {

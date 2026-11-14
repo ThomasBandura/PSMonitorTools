@@ -48,8 +48,8 @@ Dieses Projekt bietet eine zuverlässige programmatische Schnittstelle zur Steue
 - **Enable-MonitorAudio / Disable-MonitorAudio**: Hebt Stummschaltung auf/Schaltet stumm
 
 #### Bildeinstellungen
-- **Get-MonitorBrightness / Set-MonitorBrightness**: Steuert Helligkeit (0-100)
-- **Get-MonitorContrast / Set-MonitorContrast**: Steuert Kontrast (0-100)
+- **Get-MonitorBrightness / Set-MonitorBrightness**: Steuert Helligkeit (0 bis Monitor-Maximum, meist 100)
+- **Get-MonitorContrast / Set-MonitorContrast**: Steuert Kontrast (0 bis Monitor-Maximum, meist 100)
 
 #### Erweiterte Funktionen
 - **Find-MonitorVcpCodes**: Interaktives Tool zum Entdecken versteckter VCP-Codes
