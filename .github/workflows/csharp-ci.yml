@@ -6,12 +6,14 @@ on:
     paths:
       - 'CSharp/**'
       - 'global.json'
+      - 'spec/**'
       - '.github/workflows/csharp-ci.yml'
   pull_request:
     branches: [ master ]
     paths:
       - 'CSharp/**'
       - 'global.json'
+      - 'spec/**'
 
 permissions:
   contents: read

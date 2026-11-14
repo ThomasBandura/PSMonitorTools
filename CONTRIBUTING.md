@@ -114,6 +114,7 @@ and reload the window:
 ## Code Style
 
 ### PowerShell
+- The module must keep working on **Windows PowerShell 5.1** (CI runs the tests on 5.1 and 7). Avoid PowerShell 7-only syntax (`?.`, `??`, ternary `? :`, `&&`/`||`) and keep the code readable: no precompiled binaries, native calls stay as C# source in `PSMonitorToolsHelper.ps1`.
 - Use approved verbs (Get, Set, Enable, Disable, etc.)
 - Follow [PowerShell Best Practices](https://poshcode.gitbooks.io/powershell-practice-and-style/)
 - Include comment-based help for all functions
@@ -127,6 +128,9 @@ and reload the window:
 - Use dependency injection where appropriate
 
 ## Testing
+
+### Shared behavior rules
+The PowerShell module and `MonitorTools.Core` implement the same rules (PBP detection, left input mask, value limits, input switch order and rejections). They are described once as test cases in [`spec/monitor-behavior.json`](spec/monitor-behavior.json) and both test suites run them. When you change such a rule, update the spec and both implementations; see [`spec/README.md`](spec/README.md).
 
 ### PowerShell
 - Add Pester tests for new cmdlets

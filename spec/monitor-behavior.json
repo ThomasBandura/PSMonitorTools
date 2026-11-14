@@ -1,0 +1,103 @@
+{
+  "description": "Shared behavior cases for the PowerShell module and MonitorTools.Core. Both test suites (Pester and xUnit) run every case, so a rule changed on one side only fails CI. Hex values are strings with 0x prefix; input names are the MonitorInput enum names. See spec/README.md.",
+
+  "pbpActive": [
+    { "value": "0x00", "active": false, "note": "PBP off" },
+    { "value": "0x24", "active": true,  "note": "PBP on (Dell U4924DW)" },
+    { "value": "0x21", "active": true,  "note": "other PBP/PIP modes count as active (#7)" },
+    { "value": "0x01", "active": true }
+  ],
+
+  "leftInputValue": [
+    { "input": "DisplayPort", "pbpActive": false, "value": "0x0F" },
+    { "input": "Hdmi1",       "pbpActive": false, "value": "0x11" },
+    { "input": "DisplayPort", "pbpActive": true,  "value": "0xF0F", "note": "masked with 0xF00 so PBP stays on (#6)" },
+    { "input": "Hdmi2",       "pbpActive": true,  "value": "0xF12" },
+    { "input": "UsbC",        "pbpActive": true,  "value": "0xF1B" }
+  ],
+
+  "continuousValue": [
+    { "value": 0,   "maximum": 100, "valid": true,  "limit": 100 },
+    { "value": 100, "maximum": 100, "valid": true,  "limit": 100 },
+    { "value": 101, "maximum": 100, "valid": false, "limit": 100 },
+    { "value": 250, "maximum": 255, "valid": true,  "limit": 255 },
+    { "value": 80,  "maximum": 50,  "valid": false, "limit": 50 },
+    { "value": 50,  "maximum": 0,   "valid": true,  "limit": 100, "note": "no maximum reported: 0-100 assumed (#30)" },
+    { "value": 101, "maximum": 0,   "valid": false, "limit": 100 }
+  ],
+
+  "inputSwitch": [
+    {
+      "name": "without PBP: left then right, no collision checks",
+      "pbpActive": false, "currentLeft": null, "currentRight": null,
+      "left": "Hdmi1", "right": "Hdmi1",
+      "steps": ["Left:Hdmi1", "Right:Hdmi1"], "error": null
+    },
+    {
+      "name": "free left input",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "Hdmi2", "right": null,
+      "steps": ["Left:Hdmi2"], "error": null
+    },
+    {
+      "name": "setting the current left input again",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "DisplayPort", "right": null,
+      "steps": ["Left:DisplayPort"], "error": null
+    },
+    {
+      "name": "free right input",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": null, "right": "UsbC",
+      "steps": ["Right:UsbC"], "error": null
+    },
+    {
+      "name": "left input shown on the right side",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "Hdmi1", "right": null,
+      "steps": [], "error": "Conflict"
+    },
+    {
+      "name": "right input shown on the left side",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": null, "right": "DisplayPort",
+      "steps": [], "error": "Conflict"
+    },
+    {
+      "name": "same target on both sides",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "UsbC", "right": "UsbC",
+      "steps": [], "error": "Conflict"
+    },
+    {
+      "name": "swapping both sides",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "Hdmi1", "right": "DisplayPort",
+      "steps": [], "error": "Swap"
+    },
+    {
+      "name": "target left is the current right: right first",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "UsbC",
+      "left": "UsbC", "right": "Hdmi1",
+      "steps": ["Right:Hdmi1", "Left:UsbC"], "error": null
+    },
+    {
+      "name": "target right is the current left: left first",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "UsbC",
+      "left": "Hdmi1", "right": "DisplayPort",
+      "steps": ["Left:Hdmi1", "Right:DisplayPort"], "error": null
+    },
+    {
+      "name": "both sides to free inputs: left first",
+      "pbpActive": true, "currentLeft": "DisplayPort", "currentRight": "Hdmi1",
+      "left": "Hdmi2", "right": "UsbC",
+      "steps": ["Left:Hdmi2", "Right:UsbC"], "error": null
+    },
+    {
+      "name": "current inputs unknown (not readable): only the targets are checked",
+      "pbpActive": true, "currentLeft": null, "currentRight": null,
+      "left": "Hdmi1", "right": "Hdmi2",
+      "steps": ["Left:Hdmi1", "Right:Hdmi2"], "error": null
+    }
+  ]
+}
