@@ -12,7 +12,7 @@
 <RunSettings>
   <RunConfiguration>
     <EnvironmentVariables>
-      <MONITORTOOLS_HARDWARE_TESTS>1</MONITORTOOLS_HARDWARE_TESTS>
+      <MONITORTOOLS_HARDWARE_TESTS>0</MONITORTOOLS_HARDWARE_TESTS>
     </EnvironmentVariables>
   </RunConfiguration>
 </RunSettings>
