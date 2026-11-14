@@ -28,6 +28,10 @@ $script:PbpModeValues = @{
     LeftInputMask = 0xF00
 }
 
+# Capabilities strings per physical monitor for the current session (#21).
+# Reading them via DDC/CI takes about 2 seconds per monitor, but the content does not change.
+$script:CapabilitiesCache = @{}
+
 #endregion
 
 #region Private Helper Functions
@@ -40,6 +44,84 @@ function Convert-WmiString {
     param($WmiOutput)
     if (-not $WmiOutput) { return $null }
     -join ($WmiOutput | Where-Object {$_} | ForEach-Object {[char]$_})
+}
+
+function Read-MonitorCapabilitiesNative {
+    <#
+    .SYNOPSIS
+        Reads the DDC/CI capabilities string of a physical monitor once. Returns $null on failure.
+    .DESCRIPTION
+        Thin wrapper around the slow native call so the caching can be tested with mocks.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle
+    )
+
+    try { return [PSMonitorTools.Native.MonitorHelper]::GetMonitorCapabilities($MonitorHandle) } catch { return $null }
+}
+
+function Get-MonitorCapabilities {
+    <#
+    .SYNOPSIS
+        Returns the capabilities string of a physical monitor, cached per session
+    .DESCRIPTION
+        The cache key is built from the device path, the position behind the display and the
+        description, so it stays valid while the physical monitor handles change between calls.
+        Failed reads are not cached and are retried on the next call.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [IntPtr]$MonitorHandle,
+
+        [Parameter(Mandatory=$true)]
+        [string]$CacheKey
+    )
+
+    if ($script:CapabilitiesCache.ContainsKey($CacheKey)) {
+        return $script:CapabilitiesCache[$CacheKey]
+    }
+
+    $cap = Read-MonitorCapabilitiesNative -MonitorHandle $MonitorHandle
+    if (-not [string]::IsNullOrEmpty($cap)) {
+        $script:CapabilitiesCache[$CacheKey] = $cap
+    }
+    return $cap
+}
+
+function Get-MonitorNameCandidate {
+    <#
+    .SYNOPSIS
+        Returns monitor names for the argument completer without slow DDC/CI reads
+    .DESCRIPTION
+        Uses the physical monitor descriptions, the WMI friendly names and the model names
+        that are already cached. Capabilities and firmware are not read.
+    #>
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    $handles = try { [PSMonitorTools.Native.MonitorHelper]::GetMonitorHandles() } catch { @() }
+    foreach ($h in $handles) {
+        if (-not $h) { continue }
+        $physicalMonitors = try { [PSMonitorTools.Native.MonitorHelper]::GetPhysicalMonitors($h) } catch { $null }
+        if (-not $physicalMonitors) { continue }
+        try {
+            foreach ($pm in $physicalMonitors) {
+                if (-not [string]::IsNullOrWhiteSpace($pm.Description)) { $candidates.Add($pm.Description) }
+            }
+        } finally { [PSMonitorTools.Native.MonitorHelper]::DestroyPhysicalMonitors($physicalMonitors.Count, $physicalMonitors) | Out-Null }
+    }
+
+    $wmi = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue
+    foreach ($m in $wmi) {
+        $name = Convert-WmiString $m.UserFriendlyName
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $candidates.Add($name) }
+    }
+
+    foreach ($cap in $script:CapabilitiesCache.Values) {
+        if ($cap -match 'model\(([^)]+)\)') { $candidates.Add($matches[1]) }
+    }
+
+    $candidates | Sort-Object -Unique
 }
 
 function Invoke-PhysicalMonitorAction {
@@ -72,7 +154,9 @@ function Invoke-PhysicalMonitorAction {
         $physicalMonitors = [PSMonitorTools.Native.MonitorHelper]::GetPhysicalMonitors($h)
         if (-not $physicalMonitors) { continue }
         try {
+            $physicalIndex = -1
             foreach ($pm in $physicalMonitors) {
+                $physicalIndex++
                 $ip = $pm.Handle
                 if ($null -eq $ip) { continue }
                 $pmSafe = [pscustomobject]@{ Handle = $ip; Description = $pm.Description }
@@ -97,7 +181,8 @@ function Invoke-PhysicalMonitorAction {
                 }
 
                 # Centralized Calculation and Filtering
-                $cap = try { [PSMonitorTools.Native.MonitorHelper]::GetMonitorCapabilities($pmSafe.Handle) } catch { $null }
+                $cacheKey = "$devId|$physicalIndex|$($pmSafe.Description)"
+                $cap = Get-MonitorCapabilities -MonitorHandle $pmSafe.Handle -CacheKey $cacheKey
                 $model = if ($cap -and $cap -match 'model\(([^)]+)\)') { $matches[1] } else { $null }
                 $wmiFriendlyName = if ($wmiMonitor) { Convert-WmiString $wmiMonitor.UserFriendlyName } else { $null }
 
@@ -1035,32 +1120,10 @@ Export-ModuleMember -Function @(
 Register-ArgumentCompleter -CommandName Get-MonitorInfo, Get-MonitorInput, Get-MonitorPBP, Switch-MonitorInput, Enable-MonitorPBP, Disable-MonitorPBP, Get-MonitorAudioVolume, Set-MonitorAudioVolume, Get-MonitorAudio, Enable-MonitorAudio, Disable-MonitorAudio, Get-MonitorBrightness, Set-MonitorBrightness, Get-MonitorContrast, Set-MonitorContrast, Find-MonitorVcpCodes -ParameterName MonitorName -ScriptBlock {
     param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
-    $candidates = [System.Collections.Generic.List[string]]::new()
+    # Only cheap sources (descriptions, WMI, cached models): no DDC/CI capabilities or firmware reads (#21)
+    $results = try { Get-MonitorNameCandidate } catch { @() }
 
-    # 1. Try to get info via exported Get-MonitorInfo
-    try {
-        if (Get-Command Get-MonitorInfo -ErrorAction SilentlyContinue) {
-            $monitors = Get-MonitorInfo -ErrorAction SilentlyContinue
-            if ($monitors) {
-                $monitors.Name | Where-Object { $_ } | ForEach-Object { $candidates.Add($_) }
-                $monitors.Model | Where-Object { $_ } | ForEach-Object { $candidates.Add($_) }
-            }
-        }
-    } catch { }
-
-    # 2. Add WMI fallback (usually works even if API fails)
-    try {
-        $wmi = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue
-        foreach ($m in $wmi) {
-            if ($m.UserFriendlyName) {
-                $name = -join ($m.UserFriendlyName | Where-Object {$_} | ForEach-Object {[char]$_})
-                if (-not [string]::IsNullOrWhiteSpace($name)) { $candidates.Add($name) }
-            }
-        }
-    } catch { }
-
-    # 3. Filter and return
-    $results = $candidates | Sort-Object -Unique
+    # Filter and return
     $word = $wordToComplete.Trim([char[]]"'`"")
     $wordPattern = "*$([WildcardPattern]::Escape($word))*"
     foreach ($val in $results) {

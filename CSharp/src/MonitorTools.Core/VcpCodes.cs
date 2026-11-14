@@ -106,6 +106,24 @@ public static class PbpModeValue
     /// PBP Mode On
     /// </summary>
     public const uint On = 0x24;
+
+    /// <summary>
+    /// Added to the left input value (VCP 0x60) while PBP is active, so that switching the
+    /// left input never turns PBP off. Same behavior as the PowerShell module.
+    /// </summary>
+    public const uint LeftInputMask = 0xF00;
+
+    /// <summary>
+    /// Returns true if a VCP 0xE9 value means PBP/PIP is active. Every value other than
+    /// <see cref="Off"/> counts as active, same as the PowerShell module.
+    /// </summary>
+    public static bool IsActive(uint value) => value != Off;
+
+    /// <summary>
+    /// Returns the VCP 0x60 value for the left input, masked with <see cref="LeftInputMask"/> while PBP is active
+    /// </summary>
+    public static uint GetLeftInputValue(MonitorInput input, bool pbpActive)
+        => pbpActive ? LeftInputMask | (uint)input : (uint)input;
 }
 
 /// <summary>

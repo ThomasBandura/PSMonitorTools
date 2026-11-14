@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- C#: `SetInput` (`input set`, `input switch`, `pbp set-left`) masks the left input with 0xF00 while PBP is active, like the PowerShell module. On the Dell U4924DW, PBP also stayed on without the mask (#6).
+- C#: every VCP 0xE9 value other than 0x00 counts as PBP active, like the PowerShell module; monitors without PBP support count as inactive when switching inputs (#7).
+
 ### Changed
+- PowerShell: the capabilities string (model name) is read once per monitor and session instead of on every cmdlet call; on the Dell U4924DW a call drops from about 1.8 s to under 0.1 s after the first one (#21).
+- PowerShell: tab completion for `-MonitorName` uses monitor descriptions, WMI names and cached model names only, without DDC/CI reads (#21).
 - CLI: migrated from System.CommandLine 2.0.0-beta4 to 3.0.0; shared `--monitor` option and central error handling, commands return exit codes instead of calling `Environment.Exit` (#27).
 - C#: monitor indexes refer to physical monitors (like the PowerShell module), so cloned displays are reachable individually (#8).
 - Brightness, contrast and volume are checked against the maximum reported by the monitor instead of a fixed 0-100; C# sets the brightness via VCP 0x10 like the PowerShell module (#30).

@@ -270,6 +270,30 @@ public class MonitorHardwareTests : IDisposable
     }
 
     [HardwareFact]
+    public void Test09b_SetInputKeepsPbpEnabled()
+    {
+        if (_skipTests) return;
+
+        // Arrange - PBP on (left masked with 0xF00, #6)
+        if (!_service.IsPbpEnabled(_testMonitorIndex))
+        {
+            _service.EnablePbp(_testMonitorIndex);
+            Sleep();
+            Sleep();
+        }
+
+        // Act
+        _service.SetInput(MonitorInput.DisplayPort, _testMonitorIndex);
+        Sleep();
+
+        // Assert
+        Assert.True(_service.IsPbpEnabled(_testMonitorIndex));
+        Assert.Equal(MonitorInput.DisplayPort, _service.GetInput(_testMonitorIndex));
+        var (raw, _) = _service.GetVcpFeature(VcpCode.InputSource, _testMonitorIndex);
+        Assert.Equal(PbpModeValue.LeftInputMask, raw & 0xF00);
+    }
+
+    [HardwareFact]
     public void Test10_SmartOrderingCleanup()
     {
         if (_skipTests) return;

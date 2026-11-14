@@ -653,3 +653,62 @@ Describe 'Monitor module logic (mocked hardware, part 2)' {
         }
     }
 }
+
+Describe 'Capabilities cache and completer (#21)' {
+    BeforeAll {
+        $modulePath = Join-Path $PSScriptRoot '..\PSMonitorTools\PSMonitorTools.psd1'
+        Import-Module $modulePath -Force
+    }
+
+    BeforeEach {
+        InModuleScope PSMonitorTools { $script:CapabilitiesCache.Clear() }
+    }
+
+    It 'reads the capabilities only once per monitor' {
+        InModuleScope PSMonitorTools {
+            Mock Read-MonitorCapabilitiesNative { '(prot(monitor)model(U4924DW))' }
+
+            $first = Get-MonitorCapabilities -MonitorHandle ([IntPtr]1) -CacheKey 'dev|0|Dell'
+            $second = Get-MonitorCapabilities -MonitorHandle ([IntPtr]2) -CacheKey 'dev|0|Dell'
+
+            $first | Should -Be '(prot(monitor)model(U4924DW))'
+            $second | Should -Be $first
+            Should -Invoke Read-MonitorCapabilitiesNative -Times 1 -Exactly
+        }
+    }
+
+    It 'keeps separate entries per monitor' {
+        InModuleScope PSMonitorTools {
+            Mock Read-MonitorCapabilitiesNative { "model(M$MonitorHandle)" }
+
+            Get-MonitorCapabilities -MonitorHandle ([IntPtr]1) -CacheKey 'a' | Should -Be 'model(M1)'
+            Get-MonitorCapabilities -MonitorHandle ([IntPtr]2) -CacheKey 'b' | Should -Be 'model(M2)'
+            Should -Invoke Read-MonitorCapabilitiesNative -Times 2 -Exactly
+        }
+    }
+
+    It 'does not cache failed reads' {
+        InModuleScope PSMonitorTools {
+            Mock Read-MonitorCapabilitiesNative { $null }
+
+            Get-MonitorCapabilities -MonitorHandle ([IntPtr]1) -CacheKey 'x' | Should -BeNullOrEmpty
+            Get-MonitorCapabilities -MonitorHandle ([IntPtr]1) -CacheKey 'x' | Should -BeNullOrEmpty
+            Should -Invoke Read-MonitorCapabilitiesNative -Times 2 -Exactly
+            $script:CapabilitiesCache.ContainsKey('x') | Should -BeFalse
+        }
+    }
+
+    It 'completer candidates do not read capabilities or VCP values' {
+        InModuleScope PSMonitorTools {
+            Mock Read-MonitorCapabilitiesNative { throw 'must not be called' }
+            Mock Read-VcpFeatureNative { throw 'must not be called' }
+            $script:CapabilitiesCache['k'] = '(model(CachedModel))'
+
+            $names = @(Get-MonitorNameCandidate)
+
+            $names | Should -Contain 'CachedModel'
+            Should -Invoke Read-MonitorCapabilitiesNative -Times 0 -Exactly
+            Should -Invoke Read-VcpFeatureNative -Times 0 -Exactly
+        }
+    }
+}
