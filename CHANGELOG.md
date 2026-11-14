@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- C#/CLI: input switches are confirmed by the monitor step by step instead of fixed 2-second pauses; a switch the monitor ignores now fails with exit code 1 instead of reporting success. A missing DDC/CI answer after switching away is reported as a warning.
+- C#/CLI: while PBP is active, a left input already shown on the right (and vice versa) is rejected, and swapping left and right is rejected with a clear message; the monitor silently ignored both before. PowerShell rejects the swap up front as well.
+- C#: `EnablePbp`/`DisablePbp` wait until the monitor confirms the PBP change (up to 15 s), and VCP reads are retried up to 3 times like in the PowerShell module, so commands right after a PBP change no longer fail.
+- CLI: `vcp set` accepts hex values (`vcp set 0x60 0xF0F`), as already shown in the documentation.
 - C#: `SetInput` (`input set`, `input switch`, `pbp set-left`) masks the left input with 0xF00 while PBP is active, like the PowerShell module. On the Dell U4924DW, PBP also stayed on without the mask (#6).
 - C#: every VCP 0xE9 value other than 0x00 counts as PBP active, like the PowerShell module; monitors without PBP support count as inactive when switching inputs (#7).
 

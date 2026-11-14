@@ -28,7 +28,7 @@ internal static class LevelCommands
         command.SetAction(parseResult => CliCommon.Run(() =>
         {
             int monitorIndex = parseResult.GetValue(monitorOption);
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             int value = getter(service, monitorIndex);
 
             Console.WriteLine($"Monitor {monitorIndex} {feature}: {value}{unit}");
@@ -54,7 +54,7 @@ internal static class LevelCommands
             int value = parseResult.GetValue(valueArgument);
             int monitorIndex = parseResult.GetValue(monitorOption);
 
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             setter(service, value, monitorIndex);
 
             Console.WriteLine($"Monitor {monitorIndex} {feature} set to {value}{unit}");

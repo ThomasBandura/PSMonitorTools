@@ -155,20 +155,29 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Sets the input source of a specific monitor
+    /// Timeout for the monitor to confirm an input switch
+    /// </summary>
+    internal static readonly TimeSpan InputConfirmTimeout = TimeSpan.FromSeconds(10);
+
+    private static readonly TimeSpan InputPollInterval = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// Raised for non-fatal problems, e.g. when the monitor does not answer DDC/CI after an input
+    /// switch (expected if this PC is not connected to the new input)
+    /// </summary>
+    public event EventHandler<string>? Warning;
+
+    /// <summary>
+    /// Sets the (left) input source of a specific monitor and waits until the monitor confirms it
     /// </summary>
     /// <remarks>
     /// While PBP is active, the value is masked with <see cref="PbpModeValue.LeftInputMask"/>
-    /// so that PBP stays on.
+    /// so that PBP stays on, and an input already shown on the right side is rejected.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">The input is used by the right side, or the monitor reports a different input.</exception>
     public void SetInput(MonitorInput input, int monitorIndex = 0)
     {
-        SetLeftInput(input, TryGetPbpEnabled(monitorIndex), monitorIndex);
-    }
-
-    private void SetLeftInput(MonitorInput input, bool pbpActive, int monitorIndex)
-    {
-        SetVcpFeature(VcpCode.InputSource, PbpModeValue.GetLeftInputValue(input, pbpActive), monitorIndex);
+        SetInputSmart(input, null, monitorIndex);
     }
 
     /// <summary>
@@ -188,65 +197,100 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Sets the input source with smart PBP collision detection
+    /// Sets the left and/or right input with PBP collision handling. Each step is confirmed by the
+    /// monitor before the next one is sent.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Left and right would use the same input, left and right should be swapped, or the monitor
+    /// reports a different input after the switch.
+    /// </exception>
     public void SetInputSmart(MonitorInput? leftInput = null, MonitorInput? rightInput = null, int monitorIndex = 0)
     {
         if (!leftInput.HasValue && !rightInput.HasValue)
             throw new ArgumentException("At least one input (left or right) must be specified");
 
-        // Check if PBP is active (monitors without PBP support count as inactive)
+        // Monitors without PBP support count as inactive
         bool pbpActive = TryGetPbpEnabled(monitorIndex);
 
-        if (pbpActive && leftInput.HasValue && rightInput.HasValue)
+        MonitorInput? currentLeft = null;
+        MonitorInput? currentRight = null;
+        if (pbpActive)
         {
-            // Get current inputs
-            var currentLeft = GetInput(monitorIndex);
-            var currentRight = GetPbpRightInput(monitorIndex);
+            currentLeft = GetInput(monitorIndex);
+            currentRight = GetPbpRightInput(monitorIndex);
+        }
 
-            // Validate: Left and Right cannot be the same in PBP mode
-            if (leftInput.Value == rightInput.Value)
-            {
-                throw new InvalidOperationException(
-                    $"Invalid PBP Configuration: Left input ({leftInput.Value}) cannot be the same as right input ({rightInput.Value})");
-            }
+        var steps = InputSwitchPlanner.Plan(pbpActive, currentLeft, currentRight, leftInput, rightInput);
+        bool noResponse = false;
 
-            // Smart ordering: Check for collision
-            // If target left matches current right, we must switch right first
-            // (Switching left first would conflict with current right)
-            if (leftInput.Value == currentRight)
+        foreach (var step in steps)
+        {
+            byte code;
+            uint value;
+            if (step.Side == InputSide.Left)
             {
-                // Switch right first to free up the input for left
-                SetPbpRightInput(rightInput.Value, monitorIndex);
-                Thread.Sleep(2000);
-                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
-                Thread.Sleep(2000);
+                code = VcpCode.InputSource;
+                value = PbpModeValue.GetLeftInputValue(step.Input, pbpActive);
             }
             else
             {
-                // No collision: switch in normal order (left first, then right)
-                // Note: If target right matches current left, this is NOT a problem
-                // because we switch left first, which frees up the input for right
-                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
-                Thread.Sleep(2000);
-                SetPbpRightInput(rightInput.Value, monitorIndex);
-                Thread.Sleep(2000);
+                code = VcpCode.PbpRightInput;
+                value = (uint)step.Input;
             }
+
+            SetVcpFeature(code, value, monitorIndex);
+
+            // The right input is only meaningful (and readable) while PBP is active
+            if (step.Side == InputSide.Right && !pbpActive)
+                continue;
+
+            // The monitor accepts but ignores commands while it is still re-syncing,
+            // so each step has to be confirmed before the next one is sent
+            if (!WaitForInput(code, step, monitorIndex))
+                noResponse = true;
         }
-        else
+
+        if (noResponse)
         {
-            // PBP not active or single input switch
-            if (leftInput.HasValue)
+            Warning?.Invoke(this,
+                $"Input switched on monitor {monitorIndex}, but the monitor did not answer DDC/CI to confirm it. " +
+                "This is expected if this PC is not connected to the new input.");
+        }
+    }
+
+    /// <summary>
+    /// Polls the input until the monitor reports the expected value.
+    /// Returns false if the monitor did not answer at all, throws if it reports a different input.
+    /// </summary>
+    private bool WaitForInput(byte code, InputSwitchStep step, int monitorIndex)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        uint? lastActual = null;
+
+        while (stopwatch.Elapsed < InputConfirmTimeout)
+        {
+            Thread.Sleep(InputPollInterval);
+            try
             {
-                SetLeftInput(leftInput.Value, pbpActive, monitorIndex);
-                Thread.Sleep(2000);
+                var (current, _) = ReadVcpFeature(code, monitorIndex, maxAttempts: 1);
+                lastActual = current & 0xFF;
+                if (lastActual == (uint)step.Input)
+                    return true;
             }
-            if (rightInput.HasValue)
+            catch (InvalidOperationException)
             {
-                SetPbpRightInput(rightInput.Value, monitorIndex);
-                Thread.Sleep(2000);
+                // No DDC/CI answer (yet), e.g. while the monitor re-syncs
             }
         }
+
+        if (!lastActual.HasValue)
+            return false;
+
+        var actual = Enum.IsDefined(typeof(MonitorInput), (MonitorInput)lastActual.Value)
+            ? $"{(MonitorInput)lastActual.Value} (0x{lastActual.Value:X2})"
+            : $"0x{lastActual.Value:X2}";
+        throw new InvalidOperationException(
+            $"Monitor {monitorIndex} did not switch the {step.Side.ToString().ToLowerInvariant()} input to {step.Input}: it still reports {actual}.");
     }
 
     /// <summary>
@@ -262,19 +306,58 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Enables PBP (Picture-by-Picture) mode
+    /// Enables PBP (Picture-by-Picture) mode and waits until the monitor confirms it
     /// </summary>
     public void EnablePbp(int monitorIndex = 0)
     {
-        SetVcpFeature(VcpCode.PbpMode, PbpModeValue.On, monitorIndex);
+        SetPbpMode(true, monitorIndex);
     }
 
     /// <summary>
-    /// Disables PBP (Picture-by-Picture) mode
+    /// Disables PBP (Picture-by-Picture) mode and waits until the monitor confirms it
     /// </summary>
     public void DisablePbp(int monitorIndex = 0)
     {
-        SetVcpFeature(VcpCode.PbpMode, PbpModeValue.Off, monitorIndex);
+        SetPbpMode(false, monitorIndex);
+    }
+
+    /// <summary>
+    /// Timeout for the monitor to confirm a PBP change. Some monitors (e.g. Dell U4924DW) change
+    /// their EDID with PBP, so Windows re-enumerates the display and DDC/CI is unavailable for a few seconds.
+    /// </summary>
+    internal static readonly TimeSpan PbpConfirmTimeout = TimeSpan.FromSeconds(15);
+
+    private void SetPbpMode(bool enable, int monitorIndex)
+    {
+        SetVcpFeature(VcpCode.PbpMode, enable ? PbpModeValue.On : PbpModeValue.Off, monitorIndex);
+
+        var stopwatch = Stopwatch.StartNew();
+        uint? lastActual = null;
+        while (stopwatch.Elapsed < PbpConfirmTimeout)
+        {
+            Thread.Sleep(InputPollInterval);
+            try
+            {
+                var (current, _) = ReadVcpFeature(VcpCode.PbpMode, monitorIndex, maxAttempts: 1);
+                lastActual = current;
+                if (PbpModeValue.IsActive(current) == enable)
+                    return;
+            }
+            catch (InvalidOperationException)
+            {
+                // No DDC/CI answer (yet) while the display is re-enumerated
+            }
+        }
+
+        if (lastActual.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"Monitor {monitorIndex} did not {(enable ? "enable" : "disable")} PBP: it still reports 0x{lastActual.Value:X2}.");
+        }
+
+        Warning?.Invoke(this,
+            $"PBP {(enable ? "enabled" : "disabled")} on monitor {monitorIndex}, but the monitor did not answer DDC/CI " +
+            $"within {PbpConfirmTimeout.TotalSeconds:0} seconds to confirm it.");
     }
 
     /// <summary>
@@ -290,32 +373,56 @@ public class MonitorService : IMonitorService
     /// <summary>
     /// Sets the right input source for PBP mode
     /// </summary>
+    /// <remarks>
+    /// While PBP is active, an input already shown on the left side is rejected and the switch is
+    /// confirmed by the monitor.
+    /// </remarks>
     public void SetPbpRightInput(MonitorInput input, int monitorIndex = 0)
     {
-        SetVcpFeature(VcpCode.PbpRightInput, (uint)input, monitorIndex);
+        SetInputSmart(null, input, monitorIndex);
     }
 
     /// <summary>
     /// Gets a VCP feature value
     /// </summary>
+    /// <remarks>
+    /// Failed reads are retried (up to 3 attempts, 500 ms apart), e.g. right after an input or PBP
+    /// change, same as the PowerShell module. The monitor handle is looked up again for each attempt.
+    /// </remarks>
     public (uint currentValue, uint maximumValue) GetVcpFeature(byte vcpCode, int monitorIndex = 0)
+        => ReadVcpFeature(vcpCode, monitorIndex, ReadAttempts);
+
+    private const int ReadAttempts = 3;
+    private static readonly TimeSpan ReadRetryDelay = TimeSpan.FromMilliseconds(500);
+
+    private (uint currentValue, uint maximumValue) ReadVcpFeature(byte vcpCode, int monitorIndex, int maxAttempts)
     {
         ValidateMonitorIndex(monitorIndex);
 
-        return WithPhysicalMonitor(monitorIndex, pm =>
+        for (int attempt = 1; ; attempt++)
         {
-            if (!NativeMethods.GetVCPFeatureAndVCPFeatureReply(
-                pm.hPhysicalMonitor,
-                vcpCode,
-                out _,
-                out uint currentValue,
-                out uint maximumValue))
+            try
             {
-                throw CreateWin32Exception($"Could not retrieve VCP feature 0x{vcpCode:X2}");
-            }
+                return WithPhysicalMonitor(monitorIndex, pm =>
+                {
+                    if (!NativeMethods.GetVCPFeatureAndVCPFeatureReply(
+                        pm.hPhysicalMonitor,
+                        vcpCode,
+                        out _,
+                        out uint currentValue,
+                        out uint maximumValue))
+                    {
+                        throw CreateWin32Exception($"Could not retrieve VCP feature 0x{vcpCode:X2}");
+                    }
 
-            return (currentValue, maximumValue);
-        });
+                    return (currentValue, maximumValue);
+                });
+            }
+            catch (InvalidOperationException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(ReadRetryDelay);
+            }
+        }
     }
 
     /// <summary>

@@ -20,7 +20,7 @@ public static class PbpCommand
         statusCommand.SetAction(parseResult => CliCommon.Run(() =>
         {
             int monitorIndex = parseResult.GetValue(statusMonitorOption);
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             var isEnabled = service.IsPbpEnabled(monitorIndex);
             Console.WriteLine($"PBP Mode: {(isEnabled ? "Enabled" : "Disabled")}");
 
@@ -78,7 +78,7 @@ public static class PbpCommand
         command.Options.Add(monitorOption);
         command.SetAction(parseResult => CliCommon.Run(() =>
         {
-            action(new MonitorService(), parseResult.GetValue(monitorOption));
+            action(CliCommon.CreateService(), parseResult.GetValue(monitorOption));
             return CliCommon.Success;
         }));
         return command;
@@ -97,7 +97,7 @@ public static class PbpCommand
             if (!CliCommon.TryParseInput(source, out var input))
                 return CliCommon.InvalidInput(source);
 
-            action(new MonitorService(), input, parseResult.GetValue(monitorOption));
+            action(CliCommon.CreateService(), input, parseResult.GetValue(monitorOption));
             return CliCommon.Success;
         }));
         return command;

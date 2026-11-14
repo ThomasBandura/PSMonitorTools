@@ -20,7 +20,7 @@ public static class InputCommand
         getCommand.SetAction(parseResult => CliCommon.Run(() =>
         {
             int monitorIndex = parseResult.GetValue(getMonitorOption);
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             var input = service.GetInput(monitorIndex);
 
             Console.WriteLine(Enum.IsDefined(input)
@@ -42,7 +42,7 @@ public static class InputCommand
             if (!CliCommon.TryParseInput(source, out var input))
                 return CliCommon.InvalidInput(source);
 
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             service.SetInput(input, monitorIndex);
             Console.WriteLine($"Monitor {monitorIndex} input switched to {input}");
             return CliCommon.Success;
@@ -87,7 +87,7 @@ public static class InputCommand
                 right = value;
             }
 
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             service.SetInputSmart(left, right, monitorIndex);
 
             if (left.HasValue)

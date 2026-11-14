@@ -25,7 +25,7 @@ public static class VcpCommand
             byte code = ParseVcpCode(parseResult.GetValue(getCodeArgument));
             int monitorIndex = parseResult.GetValue(getMonitorOption);
 
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             var (current, maximum) = service.GetVcpFeature(code, monitorIndex);
 
             Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2}:");
@@ -37,9 +37,9 @@ public static class VcpCommand
         // Set VCP feature subcommand
         var setCommand = new Command("set", "Set VCP feature value");
         var setCodeArgument = CreateCodeArgument();
-        var valueArgument = new Argument<uint>("value")
+        var valueArgument = new Argument<string>("value")
         {
-            Description = "Value to set"
+            Description = "Value to set, decimal or hex with 0x prefix (e.g., 50 or 0xF12)"
         };
         var setMonitorOption = CliCommon.CreateMonitorOption();
         var forceOption = new Option<bool>("--force", "-f")
@@ -53,7 +53,7 @@ public static class VcpCommand
         setCommand.SetAction(parseResult => CliCommon.Run(() =>
         {
             byte code = ParseVcpCode(parseResult.GetValue(setCodeArgument));
-            uint value = parseResult.GetValue(valueArgument);
+            uint value = ParseVcpValue(parseResult.GetValue(valueArgument));
             int monitorIndex = parseResult.GetValue(setMonitorOption);
 
             if (VcpCode.IsCritical(code) && !parseResult.GetValue(forceOption))
@@ -63,7 +63,7 @@ public static class VcpCommand
                     "Use --force to write it anyway.");
             }
 
-            var service = new MonitorService();
+            var service = CliCommon.CreateService();
             service.SetVcpFeature(code, value, monitorIndex);
 
             Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2} set to {value}");
@@ -80,6 +80,22 @@ public static class VcpCommand
     {
         Description = "VCP code in hex (e.g., 0x10 or 10)"
     };
+
+    /// <summary>
+    /// Parses a VCP value: decimal, or hex with 0x prefix
+    /// </summary>
+    internal static uint ParseVcpValue(string? valueStr)
+    {
+        var text = (valueStr ?? string.Empty).Trim();
+        bool parsed = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? uint.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint value)
+            : uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+        if (parsed)
+            return value;
+
+        throw new FormatException($"Invalid VCP value: {valueStr}. Use a decimal number like 50 or hex like 0xF12");
+    }
 
     internal static byte ParseVcpCode(string? codeStr)
     {
