@@ -124,6 +124,142 @@ function Get-MonitorNameCandidate {
     $candidates | Sort-Object -Unique
 }
 
+#region Behavior Rules
+# Pure functions without DDC/CI access. They are checked against spec/monitor-behavior.json,
+# the same cases MonitorTools.Core (C#) is tested with.
+
+function Test-PbpModeActive {
+    <#
+    .SYNOPSIS
+        Returns $true if a VCP 0xE9 value means PBP/PIP is active
+    .DESCRIPTION
+        Every value other than 0x00 counts as active (spec: pbpActive). $null (not readable) is inactive.
+    #>
+    param(
+        [Parameter(Mandatory=$false)]
+        $Value
+    )
+
+    return ($null -ne $Value -and $Value -ne $script:PbpModeValues.Off)
+}
+
+function Get-LeftInputValue {
+    <#
+    .SYNOPSIS
+        Returns the VCP 0x60 value for the left input
+    .DESCRIPTION
+        While PBP is active, the value is masked with 0xF00 so that PBP stays on (spec: leftInputValue).
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [MonitorInput]$InputSource,
+
+        [Parameter(Mandatory=$true)]
+        [bool]$PbpActive
+    )
+
+    $value = [uint32]$InputSource
+    if ($PbpActive) {
+        $value = $script:PbpModeValues.LeftInputMask + $value
+    }
+    return [uint32]$value
+}
+
+function Get-VcpValueLimit {
+    <#
+    .SYNOPSIS
+        Returns the highest allowed value for a continuous VCP feature (brightness, contrast, volume)
+    .DESCRIPTION
+        The maximum reported by the monitor. A maximum of 0 means the monitor did not report one;
+        then 0-100 is assumed (spec: continuousValue).
+    #>
+    param(
+        [Parameter(Mandatory=$false)]
+        $Maximum
+    )
+
+    if ($Maximum -gt 0) { return [uint32]$Maximum }
+    return [uint32]100
+}
+
+function Get-InputSwitchPlan {
+    <#
+    .SYNOPSIS
+        Plans the order of an input switch and rejects combinations the monitor would ignore
+    .DESCRIPTION
+        While PBP is active, the monitor silently ignores a switch to the input the other side is
+        showing. Rules (spec: inputSwitch):
+        - Left and right must not end up on the same input ('Conflict').
+        - Swapping both sides is not possible in one step ('Swap').
+        - If the new left input is still shown on the right, the right side is switched first.
+        Returns an object with Steps (Side, Input), Error ($null, 'Conflict' or 'Swap') and Message.
+    .PARAMETER CurrentLeft
+        Current left input code (low byte of VCP 0x60), 0 if unknown
+    .PARAMETER CurrentRight
+        Current right input code (low byte of VCP 0xE8), 0 if unknown
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [bool]$PbpActive,
+
+        [Parameter(Mandatory=$false)]
+        [int]$CurrentLeft = 0,
+
+        [Parameter(Mandatory=$false)]
+        [int]$CurrentRight = 0,
+
+        # Target inputs; $null means "do not change this side"
+        [Parameter(Mandatory=$false)]
+        $Left = $null,
+
+        [Parameter(Mandatory=$false)]
+        $Right = $null
+    )
+
+    $steps = [System.Collections.Generic.List[psobject]]::new()
+    if ($null -ne $Left) { $steps.Add([pscustomobject]@{ Side = 'Left'; Input = [MonitorInput]$Left }) }
+    if ($null -ne $Right) { $steps.Add([pscustomobject]@{ Side = 'Right'; Input = [MonitorInput]$Right }) }
+
+    $plan = [pscustomobject]@{ Steps = $steps; Error = $null; Message = $null }
+    if (-not $PbpActive) {
+        return $plan
+    }
+
+    $targetLeft = if ($null -ne $Left) { [int][MonitorInput]$Left } else { $CurrentLeft }
+    $targetRight = if ($null -ne $Right) { [int][MonitorInput]$Right } else { $CurrentRight }
+
+    if ($targetLeft -ne 0 -and $targetLeft -eq $targetRight) {
+        $plan.Error = 'Conflict'
+        $plan.Message = if ($null -ne $Left -and $null -ne $Right) {
+            "Invalid PBP configuration: left and right input cannot both be $([MonitorInput]$targetLeft)."
+        } elseif ($null -ne $Left) {
+            "Invalid PBP configuration: $([MonitorInput]$targetLeft) is already used by the right side."
+        } else {
+            "Invalid PBP configuration: $([MonitorInput]$targetLeft) is already used by the left side."
+        }
+        $plan.Steps = @()
+        return $plan
+    }
+
+    $bothSides = ($null -ne $Left -and $null -ne $Right)
+    if ($bothSides -and $targetLeft -eq $CurrentRight -and $targetRight -eq $CurrentLeft) {
+        $plan.Error = 'Swap'
+        $plan.Message = "Swapping left ($([MonitorInput]$CurrentLeft)) and right ($([MonitorInput]$CurrentRight)) is not possible in one step: " +
+            "the monitor ignores a switch to the input the other side is showing. Switch one side to a free input first."
+        $plan.Steps = @()
+        return $plan
+    }
+
+    # The new left input is still shown on the right: switch the right side first to free it
+    if ($bothSides -and $targetLeft -eq $CurrentRight) {
+        $steps.Reverse()
+    }
+
+    return $plan
+}
+
+#endregion
+
 function Invoke-PhysicalMonitorAction {
     <#
     .SYNOPSIS
@@ -169,9 +305,9 @@ function Invoke-PhysicalMonitorAction {
                     $parts = $devId.Split('#')
                     if ($parts.Count -ge 3) {
                         $baseInstanceName = "DISPLAY\$($parts[1])\$($parts[2])"
-                        $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq $baseInstanceName } | Select-Object -First 1
+                        $wmiMonitor = $WmiMonitorsList.Where({ $_.InstanceName -eq $baseInstanceName }, 'First')[0]
                         if (-not $wmiMonitor) {
-                             $wmiMonitor = $WmiMonitorsList | Where-Object { $_.InstanceName -eq "${baseInstanceName}_0" } | Select-Object -First 1
+                             $wmiMonitor = $WmiMonitorsList.Where({ $_.InstanceName -eq "${baseInstanceName}_0" }, 'First')[0]
                         }
                     }
                 }
@@ -473,7 +609,7 @@ function Set-MonitorVcpValue {
         if ($CheckMaximum) {
             $max = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $VcpCode -FeatureName $FeatureName -Maximum
             # A maximum of 0 or no answer means the monitor did not report one; then 0-100 is assumed
-            $limit = if ($max -gt 0) { [uint32]$max } else { [uint32]100 }
+            $limit = Get-VcpValueLimit -Maximum $max
             if ($Value -gt $limit) {
                 Write-Error "$FeatureName must be between 0 and $limit on '$($pm.Description)' (maximum reported by the monitor)."
                 return $false
@@ -557,7 +693,7 @@ function Get-MonitorPBP {
             
         $value = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
         # 0x00 usually means PBP Off
-        return ($null -ne $value -and $value -ne $script:PbpModeValues.Off)
+        return (Test-PbpModeActive -Value $value)
     }
     
     return ($results -contains $true)
@@ -581,7 +717,7 @@ function Get-MonitorInput {
             
         # Check PBP Status
         $pbpValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
-        $pbpActive = ($null -ne $pbpValue -and $pbpValue -ne $script:PbpModeValues.Off)
+        $pbpActive = Test-PbpModeActive -Value $pbpValue
         
         # Get Left/Primary Input
         $leftValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.InputSource -FeatureName 'Input Source'
@@ -657,9 +793,9 @@ function Switch-MonitorInput {
 
         # Check PBP Status
         $pbpValue = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpMode -FeatureName 'PBP Mode'
-        $pbpActive = ($null -ne $pbpValue -and $pbpValue -ne $script:PbpModeValues.Off)
+        $pbpActive = Test-PbpModeActive -Value $pbpValue
 
-        # Get current values for collision detection
+        # Current inputs are only needed for the PBP collision rules
         $currentLeftVal = 0
         $currentRightVal = 0
         if ($pbpActive) {
@@ -667,29 +803,17 @@ function Switch-MonitorInput {
             $rightVal = Invoke-VcpGet -MonitorHandle $pm.Handle -VcpCode $script:VcpCodes.PbpRightInput -FeatureName 'PBP Right Input'
             $currentLeftVal = if ($null -ne $leftVal) { $leftVal -band 0xFF } else { 0 }
             $currentRightVal = if ($null -ne $rightVal) { $rightVal -band 0xFF } else { 0 }
-
-            # Determine target values
-            $targetLeftKey = if ($doSetLeft) { [uint32]$InputLeft } else { $currentLeftVal }
-            $targetRightKey = if ($doSetRight) { [uint32]$InputRight } else { $currentRightVal }
-
-            # Validate: Left and Right cannot be the same in PBP mode
-            if ($targetLeftKey -ne 0 -and $targetRightKey -ne 0 -and $targetLeftKey -eq $targetRightKey) {
-                Write-Error ("Invalid PBP Configuration: Input Left (0x{0:x}) cannot be the same as Input Right (0x{1:x})." -f $targetLeftKey, $targetRightKey)
-                return $false
-            }
-
-            # Swapping both sides is not possible in one step: the monitor ignores a switch to the
-            # input the other side is showing, in either order
-            if ($doSetLeft -and $doSetRight -and
-                (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) -and
-                (([uint32]$InputRight -band 0xFF) -eq $currentLeftVal)) {
-                Write-Error (("Swapping left (0x{0:X2}) and right (0x{1:X2}) is not possible in one step: " +
-                    "the monitor ignores a switch to the input the other side is showing. " +
-                    "Switch one side to a free input first.") -f $currentLeftVal, $currentRightVal)
-                return $false
-            }
         }
-        
+
+        $targetLeft = if ($doSetLeft) { $InputLeft } else { $null }
+        $targetRight = if ($doSetRight) { $InputRight } else { $null }
+        $plan = Get-InputSwitchPlan -PbpActive $pbpActive -CurrentLeft $currentLeftVal -CurrentRight $currentRightVal `
+            -Left $targetLeft -Right $targetRight
+        if ($plan.Error) {
+            Write-Error $plan.Message
+            return $false
+        }
+
         # Waits until the monitor reports the expected value for one step.
         # Returns 'Verified', 'Mismatch' (monitor answered with a different value) or
         # 'NoResponse' (monitor did not answer DDC/CI at all).
@@ -726,33 +850,21 @@ function Switch-MonitorInput {
             }
         }
 
-        # Define steps
-        $steps = [System.Collections.Generic.List[psobject]]::new()
-        if ($doSetLeft) {
-            $steps.Add([pscustomobject]@{ Type="Left"; Desc="Primary/Left Input"; Code=$script:VcpCodes.InputSource; Input=[uint32]$InputLeft; MaskPbp=$true })
-        }
-        if ($doSetRight) {
-            $steps.Add([pscustomobject]@{ Type="Right"; Desc="Secondary/Right Input"; Code=$script:VcpCodes.PbpRightInput; Input=[uint32]$InputRight; MaskPbp=$false })
-        }
-
-        # Smart Ordering: Collision Detection
-        # If Target Left matches Current Right, we must switch Right FIRST to free up the input.
-        if ($pbpActive -and $doSetLeft -and $doSetRight) {
-            if (([uint32]$InputLeft -band 0xFF) -eq $currentRightVal) {
-                Write-Verbose "Smart Ordering: Target Left matches Current Right. Switching Right input FIRST to avoid collision."
-                $steps.Reverse()
+        # Turn the planned steps into VCP writes
+        $steps = foreach ($planned in $plan.Steps) {
+            if ($planned.Side -eq 'Left') {
+                [pscustomobject]@{ Type = 'Left'; Desc = 'Primary/Left Input'; Code = $script:VcpCodes.InputSource
+                    Input = [uint32]$planned.Input; Value = Get-LeftInputValue -InputSource $planned.Input -PbpActive $pbpActive }
+            } else {
+                [pscustomobject]@{ Type = 'Right'; Desc = 'Secondary/Right Input'; Code = $script:VcpCodes.PbpRightInput
+                    Input = [uint32]$planned.Input; Value = [uint32]$planned.Input }
             }
         }
 
         $noResponse = $false
         foreach ($step in $steps) {
-            $val = $step.Input
-
-            # If PBP is active, mask Left input with 0xF00 to prevent disabling PBP (Generic/Dell behavior)
-            if ($pbpActive -and $step.MaskPbp) {
-                $val = $script:PbpModeValues.LeftInputMask + $val
-                Write-Verbose ("PBP is active. Using masked value 0x{0:X} for Left Input." -f $val)
-            }
+            # Left input is masked with 0xF00 while PBP is active (see Get-LeftInputValue)
+            $val = $step.Value
 
             if (-not $cmdletContext.ShouldProcess($pm.Description, ("Set $($step.Desc) to 0x{0:X}" -f $val))) {
                 return $false

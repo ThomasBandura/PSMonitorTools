@@ -102,12 +102,18 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
+    /// Highest allowed value for a continuous feature: the maximum reported by the monitor, or 100
+    /// if it reported none (spec/monitor-behavior.json, section continuousValue)
+    /// </summary>
+    internal static uint GetContinuousLimit(uint maximum) => maximum > 0 ? maximum : 100;
+
+    /// <summary>
     /// Checks a value against the maximum reported by the monitor.
     /// A maximum of 0 means the monitor did not report one; then 0-100 is assumed.
     /// </summary>
     internal static void ValidateContinuousValue(int value, uint maximum, string featureName)
     {
-        uint limit = maximum > 0 ? maximum : 100;
+        uint limit = GetContinuousLimit(maximum);
         if (value < 0 || value > limit)
         {
             throw new ArgumentOutOfRangeException(featureName.ToLowerInvariant(), value,

@@ -498,7 +498,7 @@ Describe 'Monitor module logic (mocked hardware, part 2)' {
                     -ErrorAction SilentlyContinue -ErrorVariable err
 
                 $result | Should -BeFalse
-                "$err" | Should -Match 'cannot be the same'
+                "$err" | Should -Match 'cannot both be Hdmi1'
                 Should -Invoke Invoke-VcpSet -Times 0 -Exactly
             }
         }
@@ -525,7 +525,7 @@ Describe 'Monitor module logic (mocked hardware, part 2)' {
 
                 Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -InputRight DisplayPort -Confirm:$false `
                     -ErrorAction SilentlyContinue -ErrorVariable err | Should -BeFalse
-                "$err" | Should -Match 'Swapping left \(0x0F\) and right \(0x11\)'
+                "$err" | Should -Match 'Swapping left \(DisplayPort\) and right \(Hdmi1\)'
                 Should -Invoke Invoke-VcpSet -Times 0 -Exactly
             }
         }

@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Shared behavior cases in `spec/monitor-behavior.json` (PBP detection, left input mask, value limits, input switch order and rejections); Pester and xUnit both test against them, so a rule changed on one side only fails CI (#34).
+- PowerShell CI runs the Pester tests on Windows PowerShell 5.1 as well as PowerShell 7, and fails on test failures (`Run.Exit`).
+
+### Changed
+- PowerShell: the behavior rules are small helper functions (`Test-PbpModeActive`, `Get-LeftInputValue`, `Get-VcpValueLimit`, `Get-InputSwitchPlan`); `Switch-MonitorInput` uses them. Error messages for PBP conflicts now match the CLI.
+
 ### Fixed
+- PowerShell 5.1: `-ErrorVariable` no longer contains an internal `StopUpstreamCommandsException` after a cmdlet call.
 - C#/CLI: input switches are confirmed by the monitor step by step instead of fixed 2-second pauses; a switch the monitor ignores now fails with exit code 1 instead of reporting success. A missing DDC/CI answer after switching away is reported as a warning.
 - C#/CLI: while PBP is active, a left input already shown on the right (and vice versa) is rejected, and swapping left and right is rejected with a clear message; the monitor silently ignored both before. PowerShell rejects the swap up front as well.
 - C#: `EnablePbp`/`DisablePbp` wait until the monitor confirms the PBP change (up to 15 s), and VCP reads are retried up to 3 times like in the PowerShell module, so commands right after a PBP change no longer fail.

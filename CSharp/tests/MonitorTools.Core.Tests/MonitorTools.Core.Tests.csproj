@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shared behavior cases, also used by the Pester tests of the PowerShell module -->
+    <None Include="..\..\..\spec\monitor-behavior.json" Link="spec\monitor-behavior.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\MonitorTools.Core\MonitorTools.Core.csproj" />
   </ItemGroup>
 
