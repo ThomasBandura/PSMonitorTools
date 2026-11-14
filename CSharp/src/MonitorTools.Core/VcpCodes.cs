@@ -109,9 +109,15 @@ public static class PbpModeValue
 }
 
 /// <summary>
-/// Audio mute states
-/// VCP 0x8D: 0x00 = Muted, 0x01 = Unmuted
+/// Audio mute states for VCP 0x8D.
 /// </summary>
+/// <remarks>
+/// This is a device-specific encoding (verified on Dell U4924DW): 0x00 = muted, 0x01 = unmuted.
+/// The Dell ignores the MCCS values (writing 0x02 leaves the value unchanged).
+/// The MCCS standard defines 0x01 = muted, 0x02 = unmuted. On an MCCS-compliant monitor
+/// <see cref="Unmuted"/> (0x01) would therefore mute the audio. Use <c>vcp set 0x8D</c> with the
+/// MCCS values for such monitors.
+/// </remarks>
 public enum AudioMuteState
 {
     /// <summary>

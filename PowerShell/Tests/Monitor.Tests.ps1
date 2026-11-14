@@ -212,10 +212,11 @@ Describe 'Monitor module' {
             { & $SetFunc @params } | Should -Not -Throw
         }
 
-        It '<SetFunc> validates <Param> range (<Min>-<Max>)' -TestCases $setFunctions {
-            param($SetFunc, $Param, $Min, $Max)
-            { & $SetFunc -MonitorName "Test" -$Param ($Max + 1) } | Should -Throw
-            { & $SetFunc -MonitorName "Test" -$Param ($Min - 1) } | Should -Throw
+        It '<SetFunc> rejects <Param> values outside 0-65535 at parameter level' -TestCases $setFunctions {
+            param($SetFunc, $Param)
+            # The actual upper limit is the maximum reported by the monitor (see mocked tests)
+            { & $SetFunc -MonitorName "Test" -$Param 65536 } | Should -Throw
+            { & $SetFunc -MonitorName "Test" -$Param -1 } | Should -Throw
         }
 
         It '<SetFunc> returns false and writes an error for a non-existent monitor' -TestCases $setFunctions {
@@ -363,6 +364,291 @@ Describe 'Monitor module logic (mocked hardware)' {
                 Mock Invoke-VcpSet { $true }
 
                 Set-MonitorBrightness -MonitorName 'Monitor' -Brightness 50 -Confirm:$false | Should -BeTrue
+            }
+        }
+    }
+}
+
+Describe 'Monitor module logic (mocked hardware, part 2)' {
+    BeforeAll {
+        $modulePath = Join-Path $PSScriptRoot '..\PSMonitorTools\PSMonitorTools.psd1'
+        Import-Module $modulePath -Force
+    }
+
+    BeforeEach {
+        InModuleScope PSMonitorTools {
+            Mock Start-Sleep {}
+            Mock Invoke-PhysicalMonitorAction {
+                & $Action ([pscustomobject]@{ Handle = [IntPtr]::Zero; Description = 'Fake Monitor' }) $null 0 $null 'FakeModel'
+            }
+        }
+    }
+
+    Context 'Invoke-VcpGet retries' {
+        It 'retries failed reads and returns the value of the first successful read' {
+            InModuleScope PSMonitorTools {
+                $script:reads = 0
+                Mock Read-VcpFeatureNative {
+                    $script:reads++
+                    if ($script:reads -lt 3) { return $null }
+                    [pscustomobject]@{ Current = 0x0F; Maximum = 100 }
+                }
+
+                Invoke-VcpGet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x60 | Should -Be 0x0F
+                Should -Invoke Read-VcpFeatureNative -Times 3 -Exactly
+            }
+        }
+
+        It 'returns $null after MaxAttempts failed reads' {
+            InModuleScope PSMonitorTools {
+                Mock Read-VcpFeatureNative { $null }
+
+                Invoke-VcpGet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x60 | Should -BeNullOrEmpty
+                Should -Invoke Read-VcpFeatureNative -Times 3 -Exactly
+            }
+        }
+
+        It 'reads only once with -MaxAttempts 1' {
+            InModuleScope PSMonitorTools {
+                Mock Read-VcpFeatureNative { $null }
+
+                Invoke-VcpGet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x60 -MaxAttempts 1 | Should -BeNullOrEmpty
+                Should -Invoke Read-VcpFeatureNative -Times 1 -Exactly
+            }
+        }
+
+        It 'returns the maximum with -Maximum' {
+            InModuleScope PSMonitorTools {
+                Mock Read-VcpFeatureNative { [pscustomobject]@{ Current = 75; Maximum = 255 } }
+
+                Invoke-VcpGet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x10 -Maximum | Should -Be 255
+            }
+        }
+    }
+
+    Context 'Invoke-VcpSet retries' {
+        It 'retries a failed write and succeeds' {
+            InModuleScope PSMonitorTools {
+                $script:writes = 0
+                Mock Write-VcpFeatureNative { $script:writes++; $script:writes -ge 3 }
+
+                Invoke-VcpSet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x10 -Value 50 -MonitorDescription 'Fake' -SkipVerification |
+                    Should -BeTrue
+                Should -Invoke Write-VcpFeatureNative -Times 3 -Exactly
+            }
+        }
+
+        It 'returns false with an error after MaxRetries failed writes' {
+            InModuleScope PSMonitorTools {
+                Mock Write-VcpFeatureNative { $false }
+
+                $result = Invoke-VcpSet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x10 -Value 50 -MonitorDescription 'Fake' `
+                    -MaxRetries 2 -SkipVerification -ErrorAction SilentlyContinue -ErrorVariable err
+
+                $result | Should -BeFalse
+                "$err" | Should -Match 'after 2 attempts'
+                Should -Invoke Write-VcpFeatureNative -Times 2 -Exactly
+            }
+        }
+
+        It 'verifies the new value after writing' {
+            InModuleScope PSMonitorTools {
+                Mock Write-VcpFeatureNative { $true }
+                Mock Invoke-VcpGet { 50 }
+
+                Invoke-VcpSet -MonitorHandle ([IntPtr]::Zero) -VcpCode 0x10 -Value 50 -MonitorDescription 'Fake' |
+                    Should -BeTrue
+                Should -Invoke Invoke-VcpGet -Times 1 -Exactly -ParameterFilter { $VcpCode -eq 0x10 -and $MaxAttempts -eq 1 }
+            }
+        }
+    }
+
+    Context 'Switch-MonitorInput PBP handling' {
+        It 'masks the left input with 0xF00 when PBP is active' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF11 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x12 }
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false | Should -BeTrue
+                Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $VcpCode -eq 0x60 -and $Value -eq 0xF11 }
+            }
+        }
+
+        It 'does not mask the left input when PBP is off' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0x11 }
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -Confirm:$false | Should -BeTrue
+                Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $VcpCode -eq 0x60 -and $Value -eq 0x11 }
+            }
+        }
+
+        It 'rejects the same input on both sides when PBP is active' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF0F }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x12 }
+                Mock Invoke-VcpSet { $true }
+
+                $result = Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -InputRight Hdmi1 -Confirm:$false `
+                    -ErrorAction SilentlyContinue -ErrorVariable err
+
+                $result | Should -BeFalse
+                "$err" | Should -Match 'cannot be the same'
+                Should -Invoke Invoke-VcpSet -Times 0 -Exactly
+            }
+        }
+
+        It 'rejects a right input that equals the current left input when PBP is active' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF0F }   # left = DisplayPort
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x12 }
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputRight DisplayPort -Confirm:$false -ErrorAction SilentlyContinue |
+                    Should -BeFalse
+                Should -Invoke Invoke-VcpSet -Times 0 -Exactly
+            }
+        }
+
+        It 'switches the right input first when the new left input is the current right input (smart ordering)' {
+            InModuleScope PSMonitorTools {
+                $script:sets = [System.Collections.Generic.List[string]]::new()
+                $script:left = 0xF0F    # DisplayPort
+                $script:right = 0x1B    # UsbC
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { $script:left }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { $script:right }
+                Mock Invoke-VcpSet {
+                    $script:sets.Add(('{0:X2}' -f $VcpCode))
+                    if ($VcpCode -eq 0x60) { $script:left = $Value } else { $script:right = $Value }
+                    $true
+                }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft UsbC -InputRight Hdmi1 -Confirm:$false | Should -BeTrue
+                $script:sets | Should -Be @('E8', '60')
+            }
+        }
+
+        It 'sets the right input without waiting for confirmation when PBP is off' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x12 }
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputRight UsbC -Confirm:$false | Should -BeTrue
+                Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $VcpCode -eq 0xE8 }
+                Should -Invoke Invoke-VcpGet -Times 0 -Exactly -ParameterFilter { $VcpCode -eq 0xE8 }
+            }
+        }
+
+        It 'does nothing with -WhatIf' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+                Mock Invoke-VcpSet { $true }
+
+                Switch-MonitorInput -MonitorName 'Fake' -InputLeft Hdmi1 -WhatIf | Should -BeFalse
+                Should -Invoke Invoke-VcpSet -Times 0 -Exactly
+            }
+        }
+    }
+
+    Context 'Get-MonitorInput evaluation' {
+        It 'reports both inputs when PBP is active' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0x24 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF11 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x1B }
+
+                $state = Get-MonitorInput -MonitorName 'Fake'
+
+                $state.PBP | Should -BeTrue
+                "$($state.InputLeft)" | Should -Be 'Hdmi1'
+                "$($state.InputRight)" | Should -Be 'UsbC'
+                $state.Model | Should -Be 'FakeModel'
+            }
+        }
+
+        It 'does not read the right input when PBP is off' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0xF0F }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE8 } { 0x1B }
+
+                $state = Get-MonitorInput -MonitorName 'Fake'
+
+                $state.PBP | Should -BeFalse
+                "$($state.InputLeft)" | Should -Be 'DisplayPort'
+                $state.InputRight | Should -BeNullOrEmpty
+                Should -Invoke Invoke-VcpGet -Times 0 -Exactly -ParameterFilter { $VcpCode -eq 0xE8 }
+            }
+        }
+
+        It 'reports unknown input codes' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0xE9 } { 0 }
+                Mock Invoke-VcpGet -ParameterFilter { $VcpCode -eq 0x60 } { 0x05 }
+
+                (Get-MonitorInput -MonitorName 'Fake').InputLeft | Should -Be 'Unknown (0x05)'
+            }
+        }
+    }
+
+    Context 'Monitor maximum (#30)' {
+        It 'rejects a value above the maximum reported by the monitor' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $Maximum } { 100 }
+                Mock Invoke-VcpSet { $true }
+
+                $result = Set-MonitorBrightness -MonitorName 'Fake' -Brightness 101 -Confirm:$false `
+                    -ErrorAction SilentlyContinue -ErrorVariable err
+
+                $result | Should -BeFalse
+                "$err" | Should -Match 'between 0 and 100'
+                Should -Invoke Invoke-VcpSet -Times 0 -Exactly
+            }
+        }
+
+        It 'accepts values up to a higher maximum' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $Maximum } { 255 }
+                Mock Invoke-VcpSet { $true }
+
+                Set-MonitorContrast -MonitorName 'Fake' -Contrast 200 -Confirm:$false | Should -BeTrue
+                Should -Invoke Invoke-VcpSet -Times 1 -Exactly -ParameterFilter { $Value -eq 200 }
+            }
+        }
+
+        It 'assumes 0-100 when the monitor reports no maximum' {
+            InModuleScope PSMonitorTools {
+                Mock Invoke-VcpGet -ParameterFilter { $Maximum } { $null }
+                Mock Invoke-VcpSet { $true }
+
+                Set-MonitorAudioVolume -MonitorName 'Fake' -Volume 100 -Confirm:$false | Should -BeTrue
+                Set-MonitorAudioVolume -MonitorName 'Fake' -Volume 101 -Confirm:$false -ErrorAction SilentlyContinue | Should -BeFalse
+            }
+        }
+    }
+
+    Context 'Resolve-MonitorSetResult' {
+        It 'returns true only if all results are true' {
+            InModuleScope PSMonitorTools {
+                Resolve-MonitorSetResult -Results @($true, $true) -MonitorName 'x' | Should -BeTrue
+                Resolve-MonitorSetResult -Results @($true, $false) -MonitorName 'x' | Should -BeFalse
+            }
+        }
+
+        It 'ignores non-boolean output and writes an error when nothing matched' {
+            InModuleScope PSMonitorTools {
+                Resolve-MonitorSetResult -Results @('noise', $true) -MonitorName 'x' | Should -BeTrue
+                $result = Resolve-MonitorSetResult -Results @() -MonitorName 'Ghost' -ErrorAction SilentlyContinue -ErrorVariable err
+                $result | Should -BeFalse
+                "$err" | Should -Match "No monitor found matching 'Ghost'"
             }
         }
     }

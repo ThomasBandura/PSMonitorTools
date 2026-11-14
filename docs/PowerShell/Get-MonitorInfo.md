@@ -84,7 +84,7 @@ Set-MonitorBrightness -MonitorName 'Dell' -Brightness 50
 
 **Parameter:**
 - `-MonitorName` (erforderlich): Name oder Modell des Monitors
-- `-Brightness` (erforderlich): Helligkeitswert (0-100)
+- `-Brightness` (erforderlich): Helligkeitswert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 **Beispiele:**
 
@@ -122,7 +122,7 @@ Set-MonitorContrast -MonitorName 'Dell' -Contrast 75
 
 **Parameter:**
 - `-MonitorName` (erforderlich): Name oder Modell des Monitors
-- `-Contrast` (erforderlich): Kontrastwert (0-100)
+- `-Contrast` (erforderlich): Kontrastwert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 ### Audio / Lautstärke
 
@@ -149,7 +149,7 @@ Set-MonitorAudioVolume -MonitorName 'Dell' -Volume 50
 
 **Parameter:**
 - `-MonitorName` (erforderlich): Name oder Modell des Monitors
-- `-Volume` (erforderlich): Lautstärkewert (0-100)
+- `-Volume` (erforderlich): Lautstärkewert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 #### Get-MonitorAudio
 
@@ -161,6 +161,8 @@ Get-MonitorAudio -MonitorName 'Dell'
 
 **Rückgabewerte:**
 - Objekt mit `Name`, `Model` und `AudioEnabled` ($true = unmuted, $false = muted)
+
+**Hinweis zur Kodierung (VCP 0x8D):** Die Mute-Cmdlets nutzen die am Dell U4924DW geprüften Werte `0x00` = stumm und `0x01` = Ton an. Der MCCS-Standard definiert `0x01` = stumm und `0x02` = Ton an. Auf MCCS-konformen Monitoren ist die Bedeutung daher vertauscht bzw. `Enable-MonitorAudio` schaltet stumm.
 
 #### Enable-MonitorAudio
 

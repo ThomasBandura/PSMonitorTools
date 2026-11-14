@@ -26,18 +26,6 @@ internal static class NativeMethods
     public static extern bool DestroyPhysicalMonitor(IntPtr hMonitor);
 
     [DllImport("dxva2.dll", SetLastError = true)]
-    public static extern bool GetMonitorBrightness(
-        IntPtr hMonitor,
-        out uint pdwMinimumBrightness,
-        out uint pdwCurrentBrightness,
-        out uint pdwMaximumBrightness);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
-    public static extern bool SetMonitorBrightness(
-        IntPtr hMonitor,
-        uint dwNewBrightness);
-
-    [DllImport("dxva2.dll", SetLastError = true)]
     public static extern bool GetVCPFeatureAndVCPFeatureReply(
         IntPtr hMonitor,
         byte bVCPCode,

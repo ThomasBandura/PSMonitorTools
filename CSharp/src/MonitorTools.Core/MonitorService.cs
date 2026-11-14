@@ -35,34 +35,25 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Gets the brightness level of a specific monitor
+    /// Gets the brightness level of a specific monitor (VCP 0x10)
     /// </summary>
     public int GetBrightness(int monitorIndex = 0)
     {
-        if (monitorIndex < 0 || monitorIndex >= _monitors.Count)
-            throw new ArgumentOutOfRangeException(nameof(monitorIndex), "Invalid monitor index");
-
-        var monitor = _monitors[monitorIndex];
-        return GetMonitorBrightness(monitor);
+        var (current, _) = GetVcpFeature(VcpCode.Brightness, monitorIndex);
+        return (int)current;
     }
 
     /// <summary>
-    /// Sets the brightness level of a specific monitor
+    /// Sets the brightness level of a specific monitor (VCP 0x10).
+    /// The value must be between 0 and the maximum reported by the monitor.
     /// </summary>
     public void SetBrightness(int brightness, int monitorIndex = 0)
     {
-        if (brightness < 0 || brightness > 100)
-            throw new ArgumentOutOfRangeException(nameof(brightness), "Brightness must be between 0 and 100");
-
-        if (monitorIndex < 0 || monitorIndex >= _monitors.Count)
-            throw new ArgumentOutOfRangeException(nameof(monitorIndex), "Invalid monitor index");
-
-        var monitor = _monitors[monitorIndex];
-        SetMonitorBrightness(monitor, brightness);
+        SetContinuousValue(VcpCode.Brightness, brightness, "Brightness", monitorIndex);
     }
 
     /// <summary>
-    /// Gets the contrast level of a specific monitor
+    /// Gets the contrast level of a specific monitor (VCP 0x12)
     /// </summary>
     public int GetContrast(int monitorIndex = 0)
     {
@@ -71,18 +62,16 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Sets the contrast level of a specific monitor
+    /// Sets the contrast level of a specific monitor (VCP 0x12).
+    /// The value must be between 0 and the maximum reported by the monitor.
     /// </summary>
     public void SetContrast(int contrast, int monitorIndex = 0)
     {
-        if (contrast < 0 || contrast > 100)
-            throw new ArgumentOutOfRangeException(nameof(contrast), "Contrast must be between 0 and 100");
-
-        SetVcpFeature(VcpCode.Contrast, (uint)contrast, monitorIndex);
+        SetContinuousValue(VcpCode.Contrast, contrast, "Contrast", monitorIndex);
     }
 
     /// <summary>
-    /// Gets the audio volume of a specific monitor
+    /// Gets the audio volume of a specific monitor (VCP 0x62)
     /// </summary>
     public int GetVolume(int monitorIndex = 0)
     {
@@ -91,14 +80,39 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Sets the audio volume of a specific monitor
+    /// Sets the audio volume of a specific monitor (VCP 0x62).
+    /// The value must be between 0 and the maximum reported by the monitor.
     /// </summary>
     public void SetVolume(int volume, int monitorIndex = 0)
     {
-        if (volume < 0 || volume > 100)
-            throw new ArgumentOutOfRangeException(nameof(volume), "Volume must be between 0 and 100");
+        SetContinuousValue(VcpCode.AudioVolume, volume, "Volume", monitorIndex);
+    }
 
-        SetVcpFeature(VcpCode.AudioVolume, (uint)volume, monitorIndex);
+    /// <summary>
+    /// Sets a continuous VCP value after checking it against the maximum reported by the monitor
+    /// </summary>
+    private void SetContinuousValue(byte vcpCode, int value, string featureName, int monitorIndex)
+    {
+        ValidateMonitorIndex(monitorIndex);
+
+        var (_, maximum) = GetVcpFeature(vcpCode, monitorIndex);
+        ValidateContinuousValue(value, maximum, featureName);
+
+        SetVcpFeature(vcpCode, (uint)value, monitorIndex);
+    }
+
+    /// <summary>
+    /// Checks a value against the maximum reported by the monitor.
+    /// A maximum of 0 means the monitor did not report one; then 0-100 is assumed.
+    /// </summary>
+    internal static void ValidateContinuousValue(int value, uint maximum, string featureName)
+    {
+        uint limit = maximum > 0 ? maximum : 100;
+        if (value < 0 || value > limit)
+        {
+            throw new ArgumentOutOfRangeException(featureName.ToLowerInvariant(), value,
+                $"{featureName} must be between 0 and {limit} (maximum reported by the monitor)");
+        }
     }
 
     /// <summary>
@@ -312,19 +326,16 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Resolves the physical monitor for a logical monitor index, runs <paramref name="action"/>
+    /// Resolves the physical monitor for a monitor index, runs <paramref name="action"/>
     /// on it and always releases all physical monitor handles afterwards.
     /// </summary>
     private T WithPhysicalMonitor<T>(int monitorIndex, Func<NativeMethods.PhysicalMonitor, T> action)
     {
-        IntPtr monitorHandle = GetMonitorHandle(monitorIndex);
-        if (monitorHandle == IntPtr.Zero)
-            throw new InvalidOperationException($"Could not get monitor handle for monitor {monitorIndex}");
-
-        return WithPhysicalMonitor(monitorHandle, action);
+        var (monitorHandle, physicalIndex) = GetPhysicalMonitorLocation(monitorIndex);
+        return WithPhysicalMonitor(monitorHandle, physicalIndex, action);
     }
 
-    private static T WithPhysicalMonitor<T>(IntPtr monitorHandle, Func<NativeMethods.PhysicalMonitor, T> action)
+    private static T WithPhysicalMonitor<T>(IntPtr monitorHandle, int physicalIndex, Func<NativeMethods.PhysicalMonitor, T> action)
     {
         if (!NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(monitorHandle, out uint monitorCount))
             throw CreateWin32Exception("Could not get number of physical monitors");
@@ -338,7 +349,10 @@ public class MonitorService : IMonitorService
 
         try
         {
-            return action(physicalMonitors[0]);
+            if (physicalIndex < 0 || physicalIndex >= physicalMonitors.Length)
+                throw new InvalidOperationException($"Physical monitor {physicalIndex} not found on this display");
+
+            return action(physicalMonitors[physicalIndex]);
         }
         finally
         {
@@ -365,12 +379,47 @@ public class MonitorService : IMonitorService
         return new InvalidOperationException($"{message} (Win32 error 0x{win32Error:X8}: {inner.Message})", inner);
     }
 
+    /// <summary>
+    /// Enumerates the physical monitors. Each physical monitor gets its own index, like in the
+    /// PowerShell module, so that cloned/duplicated displays (several physical monitors behind
+    /// one HMONITOR) are reachable individually.
+    /// </summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private void EnumerateMonitors()
     {
         _monitors.Clear();
         _detailsLoaded = false;
         int index = 0;
+
+        foreach (var display in EnumerateDisplays())
+        {
+            for (int p = 0; p < display.PhysicalCount; p++)
+            {
+                _monitors.Add(new MonitorInfo
+                {
+                    Index = index++,
+                    DeviceName = display.DeviceName,
+                    Width = display.Width,
+                    Height = display.Height,
+                    IsPrimary = display.IsPrimary
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// A logical display (HMONITOR) and the number of physical monitors behind it
+    /// </summary>
+    private readonly record struct DisplayEntry(IntPtr Handle, string DeviceName, int Width, int Height, bool IsPrimary, int PhysicalCount);
+
+    /// <summary>
+    /// Enumerates the logical displays that have at least one physical monitor. The handles are
+    /// looked up on every call because Windows re-creates them when the display is re-enumerated
+    /// (e.g. after switching PBP, which changes the EDID).
+    /// </summary>
+    private static List<DisplayEntry> EnumerateDisplays()
+    {
+        var displays = new List<DisplayEntry>();
 
         NativeMethods.MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData) =>
         {
@@ -379,22 +428,53 @@ public class MonitorService : IMonitorService
                 cbSize = (uint)Marshal.SizeOf(typeof(NativeMethods.MonitorInfoEx))
             };
 
-            if (NativeMethods.GetMonitorInfo(hMonitor, ref monitorInfo))
+            if (NativeMethods.GetMonitorInfo(hMonitor, ref monitorInfo) &&
+                NativeMethods.GetNumberOfPhysicalMonitorsFromHMONITOR(hMonitor, out uint physicalCount) &&
+                physicalCount > 0)
             {
-                _monitors.Add(new MonitorInfo
-                {
-                    Index = index++,
-                    DeviceName = monitorInfo.szDevice,
-                    Width = monitorInfo.rcMonitor.Right - monitorInfo.rcMonitor.Left,
-                    Height = monitorInfo.rcMonitor.Bottom - monitorInfo.rcMonitor.Top,
-                    IsPrimary = (monitorInfo.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0
-                });
+                displays.Add(new DisplayEntry(
+                    hMonitor,
+                    monitorInfo.szDevice,
+                    monitorInfo.rcMonitor.Right - monitorInfo.rcMonitor.Left,
+                    monitorInfo.rcMonitor.Bottom - monitorInfo.rcMonitor.Top,
+                    (monitorInfo.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0,
+                    (int)physicalCount));
             }
 
             return true;
         };
 
         NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
+        return displays;
+    }
+
+    /// <summary>
+    /// Maps a monitor index to the display (position in <paramref name="physicalCounts"/>) and the
+    /// physical monitor within that display. Returns null if the index is out of range.
+    /// </summary>
+    internal static (int Display, int Physical)? ResolvePhysicalIndex(IReadOnlyList<int> physicalCounts, int index)
+    {
+        if (index < 0)
+            return null;
+
+        int remaining = index;
+        for (int d = 0; d < physicalCounts.Count; d++)
+        {
+            if (remaining < physicalCounts[d])
+                return (d, remaining);
+            remaining -= physicalCounts[d];
+        }
+
+        return null;
+    }
+
+    private (IntPtr Handle, int PhysicalIndex) GetPhysicalMonitorLocation(int monitorIndex)
+    {
+        var displays = EnumerateDisplays();
+        var location = ResolvePhysicalIndex(displays.Select(d => d.PhysicalCount).ToList(), monitorIndex)
+            ?? throw new InvalidOperationException($"Could not find monitor {monitorIndex}");
+
+        return (displays[location.Display].Handle, location.Physical);
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -418,11 +498,8 @@ public class MonitorService : IMonitorService
         {
             try
             {
-                var hMonitor = GetMonitorHandle(i);
-                if (hMonitor == IntPtr.Zero)
-                    throw new InvalidOperationException("Monitor handle not found");
-
-                EnrichMonitorInfo(_monitors[i], hMonitor, wmiMonitors);
+                var (hMonitor, physicalIndex) = GetPhysicalMonitorLocation(i);
+                EnrichMonitorInfo(_monitors[i], hMonitor, physicalIndex, wmiMonitors);
             }
             catch (Exception ex)
             {
@@ -435,10 +512,10 @@ public class MonitorService : IMonitorService
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private void EnrichMonitorInfo(MonitorInfo monitor, IntPtr hMonitor, List<WmiMonitorData> wmiMonitors)
+    private void EnrichMonitorInfo(MonitorInfo monitor, IntPtr hMonitor, int physicalIndex, List<WmiMonitorData> wmiMonitors)
     {
-        // Assign the WMI entry belonging to this display (by device instance path)
-        var wmi = FindWmiMonitor(monitor.DeviceName, wmiMonitors);
+        // Assign the WMI entry belonging to this physical monitor (by device instance path)
+        var wmi = FindWmiMonitor(monitor.DeviceName, physicalIndex, wmiMonitors);
         if (wmi != null)
         {
             wmiMonitors.Remove(wmi);
@@ -449,7 +526,7 @@ public class MonitorService : IMonitorService
             monitor.YearOfManufacture = wmi.YearOfManufacture;
         }
 
-        WithPhysicalMonitor(hMonitor, physicalMonitor =>
+        WithPhysicalMonitor(hMonitor, physicalIndex, physicalMonitor =>
         {
             // Set description from physical monitor
             monitor.Description = physicalMonitor.szPhysicalMonitorDescription;
@@ -458,18 +535,15 @@ public class MonitorService : IMonitorService
             if (string.IsNullOrEmpty(monitor.Model))
                 monitor.Model = monitor.Description;
 
-            // Try to get brightness
-            if (NativeMethods.GetMonitorBrightness(
-                physicalMonitor.hPhysicalMonitor,
-                out _,
-                out uint currentBrightness,
-                out _))
+            // Try to get brightness (VCP 0x10)
+            try
             {
-                monitor.Brightness = (int)currentBrightness;
+                var (brightness, _) = GetVcpFeatureRaw(physicalMonitor.hPhysicalMonitor, VcpCode.Brightness);
+                monitor.Brightness = (int)brightness;
             }
-            else
+            catch (Exception ex)
             {
-                Debug.WriteLine($"Could not read brightness for {monitor.DeviceName}: Win32 error 0x{Marshal.GetLastPInvokeError():X8}");
+                Debug.WriteLine($"Could not read brightness for {monitor.DeviceName}: {ex.Message}");
             }
 
             // Try to get firmware version
@@ -491,13 +565,13 @@ public class MonitorService : IMonitorService
     }
 
     /// <summary>
-    /// Finds the WmiMonitorID entry for a display device (e.g. \\.\DISPLAY1).
+    /// Finds the WmiMonitorID entry for a physical monitor on a display device (e.g. \\.\DISPLAY1).
     /// The device interface path (\\?\DISPLAY#HwId#InstanceId#{Guid}) is mapped to the
     /// WMI instance name DISPLAY\HwId\InstanceId (optionally with the suffix _0).
     /// </summary>
-    private static WmiMonitorData? FindWmiMonitor(string deviceName, List<WmiMonitorData> wmiMonitors)
+    private static WmiMonitorData? FindWmiMonitor(string deviceName, int physicalIndex, List<WmiMonitorData> wmiMonitors)
     {
-        var instanceName = GetWmiInstanceName(deviceName);
+        var instanceName = GetWmiInstanceName(deviceName, physicalIndex);
         if (instanceName == null)
         {
             Debug.WriteLine($"Could not determine device path for {deviceName}");
@@ -508,10 +582,14 @@ public class MonitorService : IMonitorService
             ?? wmiMonitors.FirstOrDefault(w => string.Equals(w.InstanceName, instanceName + "_0", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string? GetWmiInstanceName(string deviceName)
+    /// <summary>
+    /// Enumerating the monitors of a display device returns one entry per attached monitor,
+    /// so the physical index selects the monitor in clone mode.
+    /// </summary>
+    private static string? GetWmiInstanceName(string deviceName, int physicalIndex)
     {
         var device = new NativeMethods.DisplayDevice { cb = Marshal.SizeOf<NativeMethods.DisplayDevice>() };
-        if (!NativeMethods.EnumDisplayDevices(deviceName, 0, ref device, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME))
+        if (!NativeMethods.EnumDisplayDevices(deviceName, (uint)physicalIndex, ref device, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME))
             return null;
 
         return ConvertDevicePathToWmiInstanceName(device.DeviceID);
@@ -600,59 +678,5 @@ public class MonitorService : IMonitorService
             throw CreateWin32Exception($"Could not retrieve VCP feature 0x{vcpCode:X2}");
         }
         return (currentValue, maxValue);
-    }
-
-    private int GetMonitorBrightness(MonitorInfo monitor)
-    {
-        return WithPhysicalMonitor(monitor.Index, pm =>
-        {
-            if (!NativeMethods.GetMonitorBrightness(
-                pm.hPhysicalMonitor,
-                out _,
-                out uint currentBrightness,
-                out _))
-            {
-                throw CreateWin32Exception("Could not retrieve monitor brightness");
-            }
-
-            return (int)currentBrightness;
-        });
-    }
-
-    private void SetMonitorBrightness(MonitorInfo monitor, int brightness)
-    {
-        WithPhysicalMonitor(monitor.Index, pm =>
-        {
-            if (!NativeMethods.SetMonitorBrightness(pm.hPhysicalMonitor, (uint)brightness))
-            {
-                throw CreateWin32Exception("Failed to set monitor brightness");
-            }
-
-            return true;
-        });
-    }
-
-    /// <summary>
-    /// Resolves the HMONITOR for an index. The handle is looked up on every call because Windows
-    /// re-creates it when the display is re-enumerated (e.g. after switching PBP, which changes the EDID).
-    /// </summary>
-    private IntPtr GetMonitorHandle(int index)
-    {
-        IntPtr result = IntPtr.Zero;
-        int currentIndex = 0;
-
-        NativeMethods.MonitorEnumProc callback = (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData) =>
-        {
-            if (currentIndex == index)
-            {
-                result = hMonitor;
-                return false; // Stop enumeration
-            }
-            currentIndex++;
-            return true;
-        };
-
-        NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
-        return result;
     }
 }

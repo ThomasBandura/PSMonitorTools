@@ -5,6 +5,19 @@ All notable changes to PSMonitorTools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- CLI: migrated from System.CommandLine 2.0.0-beta4 to 3.0.0; shared `--monitor` option and central error handling, commands return exit codes instead of calling `Environment.Exit` (#27).
+- C#: monitor indexes refer to physical monitors (like the PowerShell module), so cloned displays are reachable individually (#8).
+- Brightness, contrast and volume are checked against the maximum reported by the monitor instead of a fixed 0-100; C# sets the brightness via VCP 0x10 like the PowerShell module (#30).
+
+### Documentation
+- Audio mute (VCP 0x8D) is documented as device-specific: Dell U4924DW uses 0x00 = muted, 0x01 = unmuted and ignores the MCCS values (0x01 = muted, 0x02 = unmuted) (#15).
+
+### Tests
+- More Pester tests with mocked hardware (retries, PBP mask, collision handling, smart ordering, input evaluation, monitor maximum); coverage 62% -> 78% (#25).
+
 ## [1.0.0] - 2026-11-13
 
 ### Breaking Changes

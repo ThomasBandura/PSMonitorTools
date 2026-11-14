@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using MonitorTools.Core;
 
 namespace MonitorTools.CLI.Commands;
@@ -15,107 +16,82 @@ public static class VcpCommand
 
         // Get VCP feature subcommand
         var getCommand = new Command("get", "Get VCP feature value");
-        var getCodeArgument = new Argument<string>(
-            name: "code",
-            description: "VCP code in hex (e.g., 0x10 or 10)");
-        var getMonitorOption = new Option<int>(
-            aliases: new[] { "--monitor", "-m" },
-            getDefaultValue: () => 0,
-            description: "Monitor index (0-based, default: 0)");
-        getCommand.AddArgument(getCodeArgument);
-        getCommand.AddOption(getMonitorOption);
-        getCommand.SetHandler((codeStr, monitorIndex) =>
+        var getCodeArgument = CreateCodeArgument();
+        var getMonitorOption = CliCommon.CreateMonitorOption();
+        getCommand.Arguments.Add(getCodeArgument);
+        getCommand.Options.Add(getMonitorOption);
+        getCommand.SetAction(parseResult => CliCommon.Run(() =>
         {
-            try
-            {
-                byte code = ParseVcpCode(codeStr);
-                var service = new MonitorService();
-                var (current, maximum) = service.GetVcpFeature(code, monitorIndex);
-                
-                Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2}:");
-                Console.WriteLine($"  Current: {current}");
-                Console.WriteLine($"  Maximum: {maximum}");
-            }
-            catch (FormatException ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-        }, getCodeArgument, getMonitorOption);
+            byte code = ParseVcpCode(parseResult.GetValue(getCodeArgument));
+            int monitorIndex = parseResult.GetValue(getMonitorOption);
+
+            var service = new MonitorService();
+            var (current, maximum) = service.GetVcpFeature(code, monitorIndex);
+
+            Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2}:");
+            Console.WriteLine($"  Current: {current}");
+            Console.WriteLine($"  Maximum: {maximum}");
+            return CliCommon.Success;
+        }));
 
         // Set VCP feature subcommand
         var setCommand = new Command("set", "Set VCP feature value");
-        var setCodeArgument = new Argument<string>(
-            name: "code",
-            description: "VCP code in hex (e.g., 0x10 or 10)");
-        var valueArgument = new Argument<uint>(
-            name: "value",
-            description: "Value to set");
-        var setMonitorOption = new Option<int>(
-            aliases: new[] { "--monitor", "-m" },
-            getDefaultValue: () => 0,
-            description: "Monitor index (0-based, default: 0)");
-        var forceOption = new Option<bool>(
-            aliases: new[] { "--force", "-f" },
-            description: "Required for critical codes that reset settings or change the power state (0x04, 0x05, 0x06, 0x08, 0x0A, 0xB0, 0xD6)");
-        setCommand.AddArgument(setCodeArgument);
-        setCommand.AddArgument(valueArgument);
-        setCommand.AddOption(setMonitorOption);
-        setCommand.AddOption(forceOption);
-        setCommand.SetHandler((codeStr, value, monitorIndex, force) =>
+        var setCodeArgument = CreateCodeArgument();
+        var valueArgument = new Argument<uint>("value")
         {
-            try
-            {
-                byte code = ParseVcpCode(codeStr);
+            Description = "Value to set"
+        };
+        var setMonitorOption = CliCommon.CreateMonitorOption();
+        var forceOption = new Option<bool>("--force", "-f")
+        {
+            Description = "Required for critical codes that reset settings or change the power state (0x04, 0x05, 0x06, 0x08, 0x0A, 0xB0, 0xD6)"
+        };
+        setCommand.Arguments.Add(setCodeArgument);
+        setCommand.Arguments.Add(valueArgument);
+        setCommand.Options.Add(setMonitorOption);
+        setCommand.Options.Add(forceOption);
+        setCommand.SetAction(parseResult => CliCommon.Run(() =>
+        {
+            byte code = ParseVcpCode(parseResult.GetValue(setCodeArgument));
+            uint value = parseResult.GetValue(valueArgument);
+            int monitorIndex = parseResult.GetValue(setMonitorOption);
 
-                if (VcpCode.IsCritical(code) && !force)
-                {
-                    Console.Error.WriteLine(
-                        $"Error: VCP 0x{code:X2} ({VcpCode.CriticalCodes[code]}) can reset monitor settings or change its power state.");
-                    Console.Error.WriteLine("Use --force to write it anyway.");
-                    Environment.Exit(1);
-                    return;
-                }
-
-                var service = new MonitorService();
-                service.SetVcpFeature(code, value, monitorIndex);
-                
-                Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2} set to {value}");
-            }
-            catch (FormatException ex)
+            if (VcpCode.IsCritical(code) && !parseResult.GetValue(forceOption))
             {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
+                return CliCommon.Fail(
+                    $"VCP 0x{code:X2} ({VcpCode.CriticalCodes[code]}) can reset monitor settings or change its power state.",
+                    "Use --force to write it anyway.");
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                Environment.Exit(1);
-            }
-        }, setCodeArgument, valueArgument, setMonitorOption, forceOption);
 
-        command.AddCommand(getCommand);
-        command.AddCommand(setCommand);
+            var service = new MonitorService();
+            service.SetVcpFeature(code, value, monitorIndex);
+
+            Console.WriteLine($"Monitor {monitorIndex} VCP 0x{code:X2} set to {value}");
+            return CliCommon.Success;
+        }));
+
+        command.Subcommands.Add(getCommand);
+        command.Subcommands.Add(setCommand);
 
         return command;
     }
 
-    private static byte ParseVcpCode(string codeStr)
+    private static Argument<string> CreateCodeArgument() => new("code")
     {
-        codeStr = codeStr.Trim();
-        
+        Description = "VCP code in hex (e.g., 0x10 or 10)"
+    };
+
+    internal static byte ParseVcpCode(string? codeStr)
+    {
+        var text = (codeStr ?? string.Empty).Trim();
+
         // Handle 0x prefix
-        if (codeStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
-            codeStr = codeStr.Substring(2);
+            text = text[2..];
         }
 
-        if (byte.TryParse(codeStr, System.Globalization.NumberStyles.HexNumber, null, out byte code))
+        if (byte.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte code))
         {
             return code;
         }

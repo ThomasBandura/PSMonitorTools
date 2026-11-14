@@ -28,7 +28,7 @@ MonitorTools get-info -v
 - `--verbose, -v`: Zeigt zusätzliche Informationen (z.B. Gerätenamen)
 
 **Ausgabe:**
-- Index (Monitor-Nummer, 0-basiert)
+- Index (Monitor-Nummer, 0-basiert; jeder physische Monitor hat einen eigenen Index, auch im Klon-Modus, wie im PowerShell-Modul)
 - Name (Beschreibung)
 - Model (Modellname)
 - SerialNumber (Seriennummer)
@@ -63,7 +63,7 @@ MonitorTools set-brightness 100 -m 1
 ```
 
 **Argumente:**
-- `<brightness>`: Helligkeitswert (0-100)
+- `<brightness>`: Helligkeitswert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
@@ -93,7 +93,7 @@ MonitorTools set-contrast 75 -m 0
 ```
 
 **Argumente:**
-- `<contrast>`: Kontrastwert (0-100)
+- `<contrast>`: Kontrastwert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
@@ -124,7 +124,7 @@ MonitorTools set-volume 75 -m 0
 ```
 
 **Argumente:**
-- `<volume>`: Lautstärkewert (0-100)
+- `<volume>`: Lautstärkewert (0 bis zum vom Monitor gemeldeten Maximum, meist 100)
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
@@ -151,6 +151,8 @@ MonitorTools audio unmute -m 0
 - `status`: Zeigt den aktuellen Stummschaltungsstatus
 - `mute`: Schaltet den Monitor stumm
 - `unmute`: Hebt die Stummschaltung auf
+
+**Hinweis zur Kodierung (VCP 0x8D):** Die Werte sind gerätespezifisch und am Dell U4924DW geprüft: `0x00` = stumm, `0x01` = Ton an. Der Dell ignoriert die Werte des MCCS-Standards (`0x01` = stumm, `0x02` = Ton an). Auf einem MCCS-konformen Monitor würde `unmute` (schreibt `0x01`) daher stumm schalten. Für solche Monitore `vcp set 0x8D 1` (stumm) bzw. `vcp set 0x8D 2` (Ton an) verwenden.
 
 **Optionen:**
 - `--monitor, -m <index>`: Monitor-Index (0-basiert, Standard: 0)
@@ -280,7 +282,7 @@ MonitorTools vcp set 0xD6 1 --force
 - `0x12`: Kontrast
 - `0x60`: Eingabequelle (Primary/Left)
 - `0x62`: Audio-Lautstärke
-- `0x8D`: Audio Mute (0x00 = Mute, 0x01 = Unmute)
+- `0x8D`: Audio Mute (gerätespezifisch, Dell: 0x00 = Mute, 0x01 = Unmute; MCCS: 0x01 = Mute, 0x02 = Unmute)
 - `0xC9`: Firmware-Version
 - `0xE8`: PBP Right Input
 - `0xE9`: PBP-Modus (0x00 = Aus, 0x24 = Ein)
